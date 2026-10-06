@@ -50,8 +50,9 @@ function thesisBlock(t, title) {
 
 /* ===== 매수 기록 (근거 박제) ===== */
 let formImgs = [];      // 이번 폼에서 새로 붙인 이미지 (취소 시 정리)
+let buyPasteHandler = null;   // 매수 폼의 Ctrl+V 이미지 붙여넣기 (폼이 바뀌면 교체)
 function openBuyForm(editId) {
-  const t = editId ? JSON.parse(JSON.stringify(getTrade(editId))) : { id: uid(), status: 'open', strategy: settings.strategies[0], buyDate: todayStr(), buyTime: nowTime(), tags: [], imgIds: [] };
+  const t = editId ? JSON.parse(JSON.stringify(getTrade(editId))) : { id: uid(), status: 'open', strategy: settings.strategies[0], buyDate: todayStr(), tags: [], imgIds: [] };
   formImgs = [];
   openSheet(editId ? '매수 근거 수정' : '＋ 매수 기록', `
     ${chipGroup('f-strategy', settings.strategies, t.strategy, false)}
@@ -62,8 +63,7 @@ function openBuyForm(editId) {
     <div class="grid2"><label class="field"><span>매수가</span>${numInput('f-bp', t.buyPrice, '원')}</label>
       <label class="field"><span>수량</span>${numInput('f-qty', t.qty, '주')}</label></div>
     <div class="calc-line" id="f-amt">매수금액 -</div>
-    <div class="grid2"><label class="field"><span>매수일</span><input id="f-bd" type="date" value="${t.buyDate}"></label>
-      <label class="field"><span>시각</span><input id="f-bt" type="time" value="${t.buyTime || ''}"></label></div>
+    <label class="field"><span>매수일</span><input id="f-bd" type="date" value="${t.buyDate}"></label>
 
     <div class="ai-box"><span class="label">✨ 대충 쓰고 AI로 정리 <small>(폰 키보드 마이크로 말해도 됨)</small></span>
       <textarea id="f-raw" placeholder="예) 변압기 수주 공시 나오고 거래대금 1위, 장 막판까지 신고가 유지. 내일 갭 3% 뜨면 반 팔고 마이너스면 9시5분 손절"></textarea>
@@ -78,7 +78,7 @@ function openBuyForm(editId) {
     <div class="chips" style="margin:-4px 0 12px">${[2, 3, 5].map(v => `<button type="button" class="chip" data-tp="${v}">목표 +${v}%</button>`).join('')}${[-1.5, -2, -3].map(v => `<button type="button" class="chip" data-sp="${v}">손절 ${v}%</button>`).join('')}</div>
     <label class="field"><span>내일 시나리오</span><textarea id="f-scn" placeholder="갭상이면? 갭하락이면?">${esc(t.scenario || '')}</textarea></label>
     <div class="field"><span>확신도</span>${starsHTML(t.confidence)}</div>
-    <div class="field"><span>차트 캡처 <small>(매수 시점 화면 — 블로그 카드에 들어감)</small></span>
+    <div class="field"><span>차트 캡처 <small>(캡처 후 <b>Ctrl+V</b> 또는 이미지 선택 — 블로그 카드에 들어감)</small></span>
       <div class="thumbs" id="f-thumbs"></div></div>
     <div class="sheet-foot btn-row"><button type="button" class="btn primary block" id="f-save">${editId ? '수정 저장' : '근거 박제하기'}</button></div>
   `, () => { formImgs.forEach(removeImage); formImgs = []; });
@@ -107,16 +107,45 @@ function openBuyForm(editId) {
   document.querySelectorAll('[data-sp]').forEach(b => b.onclick = () => { document.getElementById('f-sp').value = b.dataset.sp; });
   // 차트 이미지
   const imgIds = [...(t.imgIds || [])];
+  const addFiles = async files => {
+    const room = 3 - imgIds.length;
+    if (room <= 0) { toast('차트 이미지는 3장까지'); return; }
+    for (const f of files.slice(0, room)) { const id = await addImage(f, t.id); imgIds.push(id); formImgs.push(id); }
+    renderThumbs(); toast('차트 이미지 추가됨');
+  };
   const renderThumbs = async () => {
     const box = document.getElementById('f-thumbs'); if (!box) return;
     const srcs = await Promise.all(imgIds.map(getImage));
     box.innerHTML = imgIds.map((id, i) => `<div class="thumb"><img src="${srcs[i] || ''}" alt=""><button type="button" data-rm="${id}" aria-label="삭제">✕</button></div>`).join('') +
-      (imgIds.length < 3 ? '<label class="thumb-add">＋ 이미지<input type="file" accept="image/*" multiple hidden id="f-file"></label>' : '');
+      (imgIds.length < 3 ? '<label class="thumb-add">＋ 이미지<input type="file" accept="image/*" multiple hidden id="f-file"></label>' +
+        (navigator.clipboard && navigator.clipboard.read ? '<button type="button" class="thumb-add" id="f-paste">⧉ 붙여넣기</button>' : '') : '');
     const fi = document.getElementById('f-file');
-    if (fi) fi.onchange = async () => { for (const f of [...fi.files].slice(0, 3 - imgIds.length)) { const id = await addImage(f, t.id); imgIds.push(id); formImgs.push(id); } renderThumbs(); };
+    if (fi) fi.onchange = () => addFiles([...fi.files]);
+    const pb = document.getElementById('f-paste');
+    if (pb) pb.onclick = async () => {
+      try {
+        const files = [];
+        for (const it of await navigator.clipboard.read()) {
+          const type = it.types.find(x => x.startsWith('image/'));
+          if (type) files.push(new File([await it.getType(type)], 'chart.' + type.split('/')[1], { type }));
+        }
+        if (files.length) addFiles(files); else toast('클립보드에 이미지가 없음 — 캡처 먼저');
+      } catch (e) { toast('클립보드 권한이 필요함 — PC는 Ctrl+V로 붙여넣기'); }
+    };
     box.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { const id = b.dataset.rm; imgIds.splice(imgIds.indexOf(id), 1); removeImage(id); formImgs = formImgs.filter(x => x !== id); renderThumbs(); });
   };
   renderThumbs();
+  // 캡처 → Ctrl+V: 폼 어디서든 이미지 붙여넣기 (글자 칸에 글자 붙여넣기는 그대로 둠)
+  if (buyPasteHandler) document.removeEventListener('paste', buyPasteHandler);
+  buyPasteHandler = e => {
+    if (!document.getElementById('f-thumbs')) { document.removeEventListener('paste', buyPasteHandler); buyPasteHandler = null; return; }
+    const cd = e.clipboardData; if (!cd) return;
+    const files = [...cd.items].filter(i => i.kind === 'file' && i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
+    if (!files.length) return;
+    if ([...cd.types].includes('text/plain') && /INPUT|TEXTAREA/.test((e.target || {}).tagName)) return;
+    e.preventDefault(); addFiles(files);
+  };
+  document.addEventListener('paste', buyPasteHandler);
   // AI 정리
   document.getElementById('f-ai').onclick = async () => {
     const raw = val('f-raw'), msg = document.getElementById('f-ai-msg');
@@ -140,7 +169,7 @@ function openBuyForm(editId) {
   };
   function collect() {
     return { strategy: chipVals('f-strategy')[0] || settings.strategies[0], name: nameEl.value.trim(), code, market,
-      buyPrice: nval('f-bp'), qty: nval('f-qty'), buyDate: val('f-bd'), buyTime: val('f-bt'), tags: chipVals('f-tags'),
+      buyPrice: nval('f-bp'), qty: nval('f-qty'), buyDate: val('f-bd'), tags: chipVals('f-tags'),
       catalyst: val('f-cat'), reason: val('f-reason'), targetPct: isFinite(nval('f-tp')) ? nval('f-tp') : null,
       stopPct: isFinite(nval('f-sp')) ? -Math.abs(nval('f-sp')) : null, scenario: val('f-scn'), confidence: Number(document.getElementById('f-conf').dataset.v) || null };
   }
@@ -166,8 +195,7 @@ function openSellForm(id) {
     <div class="grid2"><label class="field"><span>매도가</span>${numInput('s-sp', t.sellPrice, '원')}</label>
       <label class="field"><span>매도 수량</span>${numInput('s-qty', t.sellQty || t.qty, '주')}</label></div>
     <div class="calc-line" id="s-calc">-</div>
-    <div class="grid2"><label class="field"><span>매도일</span><input id="s-sd" type="date" value="${t.sellDate || todayStr()}"></label>
-      <label class="field"><span>시각</span><input id="s-st" type="time" value="${t.sellTime || nowTime()}"></label></div>
+    <label class="field"><span>매도일</span><input id="s-sd" type="date" value="${t.sellDate || todayStr()}"></label>
     <details style="margin:-4px 0 12px"><summary class="hint">증권사 실현손익으로 직접 입력 (선택)</summary>
       <label class="field" style="margin-top:8px">${numInput('s-man', t.netManual, '예: 12,345 / -8,000 (비우면 자동 계산)')}</label></details>
     <div class="row wrap" style="gap:16px;margin-bottom:12px">
@@ -188,7 +216,7 @@ function openSellForm(id) {
     const sp = nval('s-sp'), sq = nval('s-qty');
     if (!(sp > 0)) { toast('매도가를 입력하세요'); return; }
     if (!(sq > 0) || sq > t.qty) { toast('매도 수량 확인 (1 ~ ' + t.qty + ')'); return; }
-    Object.assign(t, { status: 'closed', sellPrice: sp, sellQty: sq, sellDate: val('s-sd'), sellTime: val('s-st'),
+    Object.assign(t, { status: 'closed', sellPrice: sp, sellQty: sq, sellDate: val('s-sd'),
       netManual: val('s-man') === '' ? null : nval('s-man'), thesisHit: segVal('s-hit'), planKept: segVal('s-plan'),
       mistakes: chipVals('s-mis'), review: val('s-rev'), lesson: val('s-les'), reviewAt: t.reviewAt || Date.now() });
     upsertTrade(t); closeSheet(true); rerenderActive();
