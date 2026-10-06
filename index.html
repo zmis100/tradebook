@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#f6f6f3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121314" media="(prefers-color-scheme: dark)">
+<title>트레이드북</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="app-header">
+  <h1 id="header-title">트레이드북</h1>
+  <div class="hdr-actions">
+    <span id="sync-badge" class="sync-badge" hidden></span>
+    <button id="btn-mask" class="icon-btn" type="button" title="금액 숨김 (블로그·외출용)" aria-label="금액 숨김">₩</button>
+  </div>
+</header>
+
+<main id="main">
+  <!-- 홈: 복기 대기 + 오늘 + 이번 달 요약 -->
+  <section id="tab-home" class="tab active" aria-label="홈"></section>
+  <!-- 일지: 월별 목록·검색 -->
+  <section id="tab-list" class="tab" aria-label="일지"></section>
+  <!-- 결산: 월간 통계·차트·캘린더 -->
+  <section id="tab-stats" class="tab" aria-label="결산"></section>
+  <!-- 설정 -->
+  <section id="tab-settings" class="tab" aria-label="설정"></section>
+</main>
+
+<button id="fab" class="fab" type="button">＋ 매수 기록</button>
+
+<nav class="bottom-nav" aria-label="메뉴">
+  <button class="nav-btn active" data-tab="home" type="button"><span class="nav-ico">◎</span><span>오늘</span></button>
+  <button class="nav-btn" data-tab="list" type="button"><span class="nav-ico">☰</span><span>일지</span></button>
+  <button class="nav-btn" data-tab="stats" type="button"><span class="nav-ico">▤</span><span>결산</span></button>
+  <button class="nav-btn" data-tab="settings" type="button"><span class="nav-ico">⚙</span><span>설정</span></button>
+</nav>
+
+<!-- 바텀시트(모바일) / 모달(PC) -->
+<div id="sheet" class="sheet" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <div class="sheet-head">
+      <h2 id="sheet-title"></h2>
+      <button class="icon-btn" type="button" data-close aria-label="닫기">✕</button>
+    </div>
+    <div id="sheet-body" class="sheet-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<div id="chart-tip" class="chart-tip" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
+<script src="js/stocks.js" defer></script>
+<script src="js/config.js" defer></script>
+<script src="js/core.js" defer></script>
+<script src="js/sync.js" defer></script>
+<script src="js/charts.js" defer></script>
+<script src="js/cards.js" defer></script>
+<script src="js/ai.js" defer></script>
+<script src="js/forms.js" defer></script>
+<script src="js/views.js" defer></script>
+<script src="js/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "트레이드북 — 매매일지",
+  "short_name": "트레이드북",
+  "description": "종가베팅 매매일지 — 매수 근거 박제, 다음 날 복기, 블로그 카드, 월간 결산",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f6f3",
+  "theme_color": "#121314",
+  "lang": "ko",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "매수 기록", "short_name": "매수", "url": "./#buy", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>블로그 카드 PNG 내보내기 검증</title>
+<!-- http 서버로 열어야 함 (python -m http.server). 실제 저장되는 PNG(html2canvas 결과)를 나란히 표시 -->
+<style>body{margin:0;background:#555;font:14px sans-serif;color:#fff}iframe{width:1100px;height:900px;border:0;position:absolute;left:-3000px;top:0}
+.out{display:flex;gap:16px;padding:16px;align-items:flex-start}.out figure{margin:0}.out img{width:360px;display:block}#log{padding:8px 16px;white-space:pre}</style></head>
+<body><div id="log">running…</div><div class="out" id="out"></div>
+<iframe id="f" src="../index.html?demo"></iframe>
+<script>
+const f = document.getElementById('f'), log = document.getElementById('log'), out = document.getElementById('out');
+const wait = ms => new Promise(r => setTimeout(r, ms));
+f.onload = () => setTimeout(run, 1200);
+async function run() {
+  const w = f.contentWindow, lines = [];
+  try {
+    const last = w.eval("sortClosed(liveTrades().filter(t => t.status === 'closed')).pop()");
+    const ym = last.sellDate.slice(0, 7) === w.eval('todayStr()').slice(0, 7) ? w.eval("addMonths(ymOf(todayStr()), -1)") : last.sellDate.slice(0, 7);
+    const cases = [['month', ym, 'light', false], ['month', ym, 'dark', true], ['trade', last.id, 'light', false], ['day', last.sellDate, 'dark', false]];
+    for (const [kind, payload, theme, masked] of cases) {
+      await w.openCard(kind, payload);
+      w.document.querySelector('#cd-theme button[data-v="' + theme + '"]').click();
+      if (masked) w.document.getElementById('cd-mask').click();
+      await wait(400);
+      const t0 = performance.now();
+      const canvas = await w.renderCardCanvas();
+      const fig = document.createElement('figure'), img = document.createElement('img');
+      img.src = canvas.toDataURL('image/png'); fig.appendChild(img); out.appendChild(fig);
+      lines.push(`${kind} ${payload} ${theme}${masked ? ' masked' : ''}: ${canvas.width}x${canvas.height}px, ${Math.round(performance.now() - t0)}ms`);
+    }
+    log.textContent = 'OK\n' + lines.join('\n');
+  } catch (e) { log.textContent = 'FAIL: ' + e.message + '\n' + lines.join('\n'); }
+}
+</script></body></html>

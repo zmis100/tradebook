@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>동기화 E2E</title>
+<!-- 실제 Supabase로 두 기기 동기화 검증 (http 서버 필요, 브라우저 프로필 2개로 각각 실행)
+     ?step=push&id=X : 이 기기에서 테스트 매매 + 차트 이미지 기록 후 동기화
+     ?step=pull&id=X : 새 기기에서 열었을 때 그 매매·이미지가 내려오는지 확인
+     테스트 후 행 삭제는 수동 (REST DELETE) -->
+</head><body>
+<pre id="out">running</pre>
+<iframe id="f" src="../index.html" style="width:800px;height:500px;border:0"></iframe>
+<script>
+const qs = new URLSearchParams(location.search), step = qs.get('step'), id = qs.get('id');
+const out = document.getElementById('out'), f = document.getElementById('f');
+const log = s => { out.textContent += '\n' + s; };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+f.onload = () => setTimeout(run, 500);
+async function run() {
+  const w = f.contentWindow;
+  try {
+    log('configured=' + w.eval('sbConfigured()'));
+    for (let i = 0; i < 100 && w.eval('syncing'); i++) await sleep(200);   // 앱 시작 시 자동 동기화가 끝날 때까지
+    if (step === 'push') {
+      w.upsertTrade({ id, status: 'open', strategy: '종가베팅', name: '동기화테스트', code: '000000', buyDate: '2026-10-06', buyTime: '15:20',
+        buyPrice: 10000, qty: 1, tags: ['테스트'], catalyst: 'E2E', thesisAt: Date.now(), imgIds: [] });
+      const c = w.document.createElement('canvas'); c.width = 64; c.height = 64;
+      const g = c.getContext('2d'); g.fillStyle = '#e34948'; g.fillRect(8, 8, 48, 48);
+      const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+      const imgId = await w.addImage(new w.File([blob], 't.png', { type: 'image/png' }), id);
+      const t = w.getTrade(id); t.imgIds = [imgId]; w.upsertTrade(t);
+      await w.syncNow(false);
+      log('imgId=' + imgId);
+    } else {
+      await w.syncNow(false);
+      const t = w.getTrade(id);
+      log('pulled=' + !!t + (t ? ' name=' + t.name + ' tags=' + JSON.stringify(t.tags) + ' imgs=' + (t.imgIds || []).length : ''));
+      if (t && (t.imgIds || [])[0]) { const src = await w.getImage(t.imgIds[0]); log('img=' + (src ? src.slice(0, 23) + ' len=' + src.length : 'null')); }
+    }
+    log('badge=' + w.document.getElementById('sync-badge').textContent + ' | ' + (w.localStorage.getItem('tb_last_sync') || ''));
+    log('DONE');
+  } catch (e) { log('ERROR ' + e.message); }
+}
+</script></body></html>
