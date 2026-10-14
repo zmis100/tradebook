@@ -5,6 +5,9 @@ let listYm = ymOf(todayStr()), statsYm = ymOf(todayStr()), listFilter = 'all', l
 const ratioTxt = v => v === Infinity ? '∞' : isFinite(v) ? v.toFixed(2) : '-';
 
 function tradeRowHTML(t) {
+  if (t.status === 'flat') return `<button class="trade-row" data-open="${t.id}">
+    <div class="tr-main"><div class="tr-name">😴 무포지션</div><div class="tr-sub">${esc([(t.tags || []).slice(0, 3).join(' · '), t.catalyst].filter(Boolean).join(' / ')) || '&nbsp;'}</div></div>
+    <div class="tr-pnl"><small class="muted">관망</small></div></button>`;
   const c = calcTrade(t, settings);
   const sub = [t.strategy, (t.tags || []).slice(0, 2).join(' · ')].filter(Boolean).join(' · ');
   return `<button class="trade-row" data-open="${t.id}">
@@ -29,6 +32,7 @@ function renderHome() {
   const open = live.filter(t => t.status === 'open').sort((a, b) => a.buyDate.localeCompare(b.buyDate));
   const closedToday = sortClosed(live.filter(t => t.status === 'closed' && t.sellDate === today));
   const boughtToday = live.filter(t => t.buyDate === today && t.status === 'closed');
+  const flatToday = live.filter(t => t.buyDate === today && t.status === 'flat');
   const note = getDayNote(today);
   el.innerHTML = `
     <div class="hello"><strong>${Number(today.slice(5, 7))}월 ${Number(today.slice(8))}일 (${dowOf(today)})</strong><span class="muted">${ymLabel(ymOf(today))} 누적</span></div>
@@ -44,12 +48,13 @@ function renderHome() {
       <button class="btn small ghost" data-open="${t.id}">상세</button></div>
       ${thesisBlock(t)}
       <button class="btn primary block" data-sell="${t.id}">결과 기록하기</button></div>`).join('')
-      : '<div class="card empty">보유 중인 종목 없음 — 오늘 종베 들어가면 ＋매수 기록</div>'}
+      : '<div class="card empty">보유 중인 종목 없음 — 종베 들어가면 ＋기록 (쉬는 날은 무포지션으로 이유만)</div>'}
 
-    <div class="sec-title">📝 오늘 <span class="count">${closedToday.length + boughtToday.length + open.filter(t => t.buyDate === today).length}건</span></div>
+    <div class="sec-title">📝 오늘 <span class="count">${closedToday.length + boughtToday.length + open.filter(t => t.buyDate === today).length + flatToday.length}건</span></div>
     <div class="card">
       ${closedToday.length ? `<div class="label">오늘 청산</div>${closedToday.map(tradeRowHTML).join('')}` : ''}
       ${boughtToday.length ? `<div class="label">오늘 매수 · 당일 청산</div>${boughtToday.map(tradeRowHTML).join('')}` : ''}
+      ${flatToday.length ? `<div class="label">오늘 무포지션</div>${flatToday.map(tradeRowHTML).join('')}` : ''}
       <div class="label" style="margin-top:6px">시황 메모</div>
       ${note ? `<div class="thesis" style="margin-top:0"><p style="margin:0">${esc(note)}</p></div>` : '<p class="muted" style="margin:0 0 10px;font-size:14px">오늘 시장 분위기·내일 체크할 것</p>'}
       <div class="btn-row"><button class="btn small" id="h-note">${note ? '메모 수정' : '메모 쓰기'}</button>
@@ -73,7 +78,8 @@ function renderList() {
     if (listFilter === 'open' && t.status !== 'open') return false;
     if (listFilter === 'win' && !(c && c.net > 0)) return false;
     if (listFilter === 'loss' && !(c && c.net < 0)) return false;
-    if (q && !(t.name + ' ' + (t.tags || []).join(' ') + ' ' + (t.catalyst || '') + ' ' + (t.reason || '') + ' ' + (t.review || '') + ' ' + (t.mistakes || []).join(' ')).toLowerCase().includes(q)) return false;
+    if (q && ![t.name, t.status === 'flat' ? '무포지션' : '', ...(t.tags || []), t.catalyst, t.reason, t.scenario, t.review, ...(t.mistakes || [])]
+      .filter(Boolean).join(' ').toLowerCase().includes(q)) return false;
     return true;
   });
   const groups = {};
@@ -115,13 +121,14 @@ function perfTable(sections) {
 function renderStats() {
   const el = document.getElementById('tab-stats'), live = liveTrades();
   const st = computeStats(closedIn(live, statsYm), settings);
+  const flatDays = new Set(live.filter(t => t.status === 'flat' && (t.buyDate || '').startsWith(statsYm)).map(t => t.buyDate));
   const year = statsYm.slice(0, 4), ym12 = yearMonthly(live, year, settings);
   const [y, m] = statsYm.split('-').map(Number), first = new Date(y, m - 1, 1).getDay(), last = new Date(y, m, 0).getDate(), today = todayStr();
   let cal = ['일', '월', '화', '수', '목', '금', '토'].map(w => `<div class="dow">${w}</div>`).join('');
   for (let i = 0; i < first; i++) cal += '<div class="cell blank"></div>';
   for (let d = 1; d <= last; d++) {
-    const ds = statsYm + '-' + pad2(d), v = st.byDay[ds];
-    cal += `<button class="cell ${v ? pnlClass(v.net) : ''} ${ds === today ? 'today' : ''}" ${v ? `data-day="${ds}"` : 'tabindex="-1"'} aria-label="${ds}${v ? ' ' + fmtSigned(v.net) : ''}"><span class="d">${d}</span>${v ? `<span class="v ${pnlClass(v.net)}">${masked() ? v.wins + '/' + v.n : fmtCompact(v.net)}</span>` : ''}</button>`;
+    const ds = statsYm + '-' + pad2(d), v = st.byDay[ds], flat = flatDays.has(ds);
+    cal += `<button class="cell ${v ? pnlClass(v.net) : ''} ${ds === today ? 'today' : ''}" ${v || flat ? `data-day="${ds}"` : 'tabindex="-1"'} aria-label="${ds}${v ? ' ' + fmtSigned(v.net) : ''}${flat ? ' 무포지션' : ''}"><span class="d">${d}${flat ? ' 😴' : ''}</span>${v ? `<span class="v ${pnlClass(v.net)}">${masked() ? v.wins + '/' + v.n : fmtCompact(v.net)}</span>` : flat ? '<span class="v muted">관망</span>' : ''}</button>`;
   }
   el.innerHTML = `
     <div class="month-nav"><button class="icon-btn" data-sym="-1" aria-label="이전 달">◀</button><strong>${ymLabel(statsYm)} 결산</strong><button class="icon-btn" data-sym="1" aria-label="다음 달">▶</button></div>
@@ -129,7 +136,7 @@ function renderStats() {
       <div class="kpi hero"><div class="kl">실현 손익 · 수수료·세금 차감</div><div class="kv ${pnlClass(st.net)} amt">${masked() ? '•••' : fmtSigned(st.net) + '원'}</div><div class="ks">수수료 ${masked() ? '•••' : fmtNum(st.fees)} · 세금 ${masked() ? '•••' : fmtNum(st.taxes)}</div></div>
       <div class="kpi"><div class="kl">승률</div><div class="kv">${st.n ? st.winRate.toFixed(1) + '%' : '-'}</div><div class="ks">${st.wins}승 ${st.losses}패${st.flats ? ' ' + st.flats + '무' : ''}</div></div>
       <div class="kpi"><div class="kl">손익비</div><div class="kv">${st.n ? ratioTxt(st.payoff) : '-'}</div><div class="ks">평균 ${fmtPct(st.avgWinPct, 1)} / ${fmtPct(st.avgLossPct, 1)}</div></div>
-      <div class="kpi"><div class="kl">매매 횟수</div><div class="kv">${st.n}회</div><div class="ks">평균 보유 ${st.avgHold.toFixed(1)}일</div></div>
+      <div class="kpi"><div class="kl">매매 횟수</div><div class="kv">${st.n}회</div><div class="ks">평균 보유 ${st.avgHold.toFixed(1)}일${flatDays.size ? ' · 무포지션 ' + flatDays.size + '일' : ''}</div></div>
       <div class="kpi"><div class="kl">기대값 (1회당)</div><div class="kv ${pnlClass(st.expectancy)}">${st.n ? fmtPct(st.expectancy) : '-'}</div><div class="ks">승률×평균수익 + 패율×평균손실</div></div>
       <div class="kpi"><div class="kl">Profit Factor</div><div class="kv">${st.n ? ratioTxt(st.profitFactor) : '-'}</div><div class="ks">총수익 ÷ 총손실</div></div>
       <div class="kpi"><div class="kl">최대 연승 / 연패</div><div class="kv">${st.maxWinStreak} / ${st.maxLossStreak}</div><div class="ks">청산 순서 기준</div></div>
@@ -137,7 +144,7 @@ function renderStats() {
     </div>
     <div class="btn-row" style="margin:12px 0"><button class="btn accent" id="s-card">결산 카드 (블로그)</button><button class="btn" id="s-coach">AI 월간 코칭</button></div>
     <div class="two-col">
-      <div class="card"><h3>🗓 손익 캘린더 <span class="count muted" style="font-size:12px">${masked() ? '승/매매' : '일별 실현손익'}</span></h3><div class="cal">${cal}</div></div>
+      <div class="card"><h3>🗓 손익 캘린더 <span class="count muted" style="font-size:12px">${masked() ? '승/매매' : '일별 실현손익'}${flatDays.size ? ' · 😴 무포지션' : ''}</span></h3><div class="cal">${cal}</div></div>
       <div class="card"><h3>📈 누적 손익 <span class="muted" style="font-size:12px">청산 순서</span></h3><div class="chart-box"><canvas id="c-eq"></canvas></div>
         <h3 style="margin-top:16px">일별 손익</h3><div class="chart-box"><canvas id="c-day"></canvas></div></div>
     </div>
@@ -190,6 +197,7 @@ function renderSettings() {
     <div class="card"><h3>태그 · 전략 <span class="muted" style="font-size:12px">쉼표로 구분</span></h3>
       <label class="field"><span>매수 근거 태그</span><textarea id="st-rt">${esc(s.reasonTags.join(', '))}</textarea></label>
       <label class="field"><span>실수 태그</span><textarea id="st-mt">${esc(s.mistakeTags.join(', '))}</textarea></label>
+      <label class="field"><span>무포지션 이유 태그</span><textarea id="st-ft">${esc(s.flatTags.join(', '))}</textarea></label>
       <label class="field"><span>전략</span><input id="st-sg" value="${esc(s.strategies.join(', '))}"></label></div>
 
     <div class="card"><h3>Gemini AI <span class="muted" style="font-size:12px">무료 키: aistudio.google.com</span></h3>
@@ -214,7 +222,7 @@ function renderSettings() {
   const collect = () => {
     Object.assign(settings, {
       feeBuy: parseNum(val('st-fb')), feeSell: parseNum(val('st-fs')), taxSell: parseNum(val('st-tx')),
-      blogName: val('st-blog'), styleSample: val('st-style'), reasonTags: list(val('st-rt')), mistakeTags: list(val('st-mt')), strategies: list(val('st-sg')),
+      blogName: val('st-blog'), styleSample: val('st-style'), reasonTags: list(val('st-rt')), mistakeTags: list(val('st-mt')), flatTags: list(val('st-ft')), strategies: list(val('st-sg')),
       geminiKey: val('st-gk'), geminiModel: val('st-gm') || DEFAULT_SETTINGS.geminiModel, supabaseUrl: val('st-su'), supabaseKey: val('st-sk'),
     });
     settings = applyConfigDefaults(normalizeSettings(settings)); saveSettings();
@@ -264,7 +272,7 @@ function exportCsv() {
   const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
   const rows = liveTrades().sort((a, b) => a.buyDate.localeCompare(b.buyDate)).map(t => {
     const c = calcTrade(t, settings) || {};
-    return [t.status === 'open' ? '보유' : '청산', t.strategy, t.name, t.code, t.buyDate, t.buyTime, t.buyPrice, t.qty, t.sellDate, t.sellTime, t.sellPrice, t.sellQty, c.net, c.pct !== undefined ? c.pct.toFixed(2) : '', c.fee, c.tax,
+    return [t.status === 'open' ? '보유' : t.status === 'flat' ? '무포지션' : '청산', t.strategy, t.name, t.code, t.buyDate, t.buyTime, t.buyPrice, t.qty, t.sellDate, t.sellTime, t.sellPrice, t.sellQty, c.net, c.pct !== undefined ? c.pct.toFixed(2) : '', c.fee, c.tax,
       (t.tags || []).join('|'), t.catalyst, t.reason, t.targetPct, t.stopPct, t.scenario, t.confidence, t.thesisAt ? new Date(t.thesisAt).toLocaleString('ko-KR') : '', t.thesisHit, t.planKept, (t.mistakes || []).join('|'), t.review, t.lesson].map(q).join(',');
   });
   download('tradebook_' + todayStr() + '.csv', '﻿' + [head.map(q).join(','), ...rows].join('\r\n'), 'text/csv');

@@ -97,7 +97,8 @@ function tradeCardHTML(t, o) {
 function dayCardHTML(date, o) {
   const live = liveTrades();
   const closed = sortClosed(live.filter(t => t.status === 'closed' && t.sellDate === date));
-  const opened = live.filter(t => t.buyDate === date).sort((a, b) => (a.buyTime || '').localeCompare(b.buyTime || ''));
+  const opened = live.filter(t => t.buyDate === date && t.status !== 'flat').sort((a, b) => (a.buyTime || '').localeCompare(b.buyTime || ''));
+  const flats = live.filter(t => t.buyDate === date && t.status === 'flat');
   const st = computeStats(closed, settings), mst = computeStats(closedIn(live, ymOf(date)), settings);
   const note = getDayNote(date);
   const head = `<div class="bc-kicker">종가베팅 매매일지</div><div class="bc-title">${date.slice(0, 4)}.${date.slice(5, 7)}.${date.slice(8)} (${dowOf(date)})</div>`;
@@ -120,19 +121,27 @@ function dayCardHTML(date, o) {
       ${t.reason ? `<p><span class="bc-k">근거</span>${esc(t.reason)}</p>` : ''}
       ${planTxt(t) || t.scenario ? `<p><span class="bc-k">계획</span><b>${planTxt(t)}</b>${t.scenario ? (planTxt(t) ? '<br>' : '') + esc(t.scenario) : ''}</p>` : ''}
     </div>`).join('')}</div>` : '';
+  const flatSec = flats.length ? `<div class="bc-sec"><div class="bc-sec-t">😴 오늘 무포지션 <small>${flats[0].thesisAt ? stampLabel(flats[0].thesisAt) + ' 기록' : ''}</small></div>${flats.map(t => `
+    <div class="bc-panel" style="margin-bottom:10px">
+      ${(t.tags || []).length ? `<div class="bc-chips">${t.tags.map(x => `<span class="bc-chip">${esc(x)}</span>`).join('')}</div>` : ''}
+      ${t.catalyst ? `<p><span class="bc-k">시장</span>${esc(t.catalyst)}</p>` : ''}
+      ${t.reason ? `<p><span class="bc-k">판단</span>${esc(t.reason)}</p>` : ''}
+      ${t.scenario ? `<p><span class="bc-k">내일</span>${esc(t.scenario)}</p>` : ''}
+    </div>`).join('')}</div>` : '';
   const noteSec = note ? `<div class="bc-sec"><div class="bc-sec-t">📝 시황 메모</div><div class="bc-panel"><p style="margin:0">${esc(note)}</p></div></div>` : '';
-  const empty = !closed.length && !opened.length && !note ? `<div class="bc-panel" style="margin-top:20px">이 날짜 기록이 없음</div>` : '';
-  return cardShell(o, head + hero + closedSec + openSec + noteSec + empty);
+  const empty = !closed.length && !opened.length && !flats.length && !note ? `<div class="bc-panel" style="margin-top:20px">이 날짜 기록이 없음</div>` : '';
+  return cardShell(o, head + hero + closedSec + openSec + flatSec + noteSec + empty);
 }
 
 /* ---- 월간 결산 ---- */
 function monthCardHTML(ym, o) {
   const st = computeStats(closedIn(liveTrades(), ym), settings);
+  const flatDays = new Set(liveTrades().filter(t => t.status === 'flat' && (t.buyDate || '').startsWith(ym)).map(t => t.buyDate));
   const ratio = v => v === Infinity ? '∞' : v.toFixed(2);
   const kpis = [
     ['승률', st.winRate.toFixed(1) + '%', `${st.wins}승 ${st.losses}패`],
     ['손익비', ratio(st.payoff), `평균 ${fmtPct(st.avgWinPct, 1)} / ${fmtPct(st.avgLossPct, 1)}`],
-    ['매매 횟수', st.n + '회', `평균 보유 ${st.avgHold.toFixed(1)}일`],
+    ['매매 횟수', st.n + '회', flatDays.size ? `무포지션 ${flatDays.size}일` : `평균 보유 ${st.avgHold.toFixed(1)}일`],
     ['기대값', fmtPct(st.expectancy), '매매 1회당'],
     ['Profit Factor', ratio(st.profitFactor), '총수익 ÷ 총손실'],
     ['최대 연승', st.maxWinStreak + '연승', '최대 연패 ' + st.maxLossStreak],
@@ -153,7 +162,7 @@ function monthCardHTML(ym, o) {
     const ds = ym + '-' + pad2(d), v = st.byDay[ds];
     const dayRows = v ? st.rows.filter(r => r.t.sellDate === ds) : [];
     const dp = v ? dayRows.reduce((a, r) => a + r.c.net, 0) / dayRows.reduce((a, r) => a + r.c.buyAmt, 0) * 100 : 0;
-    cells += `<div class="c ${v ? (v.net > 0 ? 'u' : v.net < 0 ? 'dn' : '') : ''}"><span class="dd">${d}</span>${v ? `<span class="vv ${pnlClass(v.net)}">${o.masked ? fmtPct(dp, 1) : fmtCompact(v.net)}</span>` : ''}</div>`;
+    cells += `<div class="c ${v ? (v.net > 0 ? 'u' : v.net < 0 ? 'dn' : '') : ''}"><span class="dd">${d}${flatDays.has(ds) ? ' 😴' : ''}</span>${v ? `<span class="vv ${pnlClass(v.net)}">${o.masked ? fmtPct(dp, 1) : fmtCompact(v.net)}</span>` : flatDays.has(ds) ? '<span class="vv" style="color:var(--b-muted)">관망</span>' : ''}</div>`;
   }
   const cal = `<div class="bc-sec"><div class="bc-sec-t">🗓 손익 캘린더</div><div class="bc-cal">${cells}</div></div>`;
   const curve = `<div class="bc-sec"><div class="bc-sec-t">📈 누적 ${o.masked ? '수익률' : '손익'} <small>청산 순서</small></div><div class="chart-box"><canvas data-card-chart="equity"></canvas></div></div>`;

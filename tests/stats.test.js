@@ -69,4 +69,14 @@ const ds = C.computeStats(demo.filter(t => t.status === 'closed'), S);
 assert.ok(ds.n > 20 && isFinite(ds.net) && ds.equity.length === ds.n, 'demo stats');
 assert.strictEqual(demo.filter(t => t.status === 'open').length, 1);
 
-console.log('OK — 손익/통계 테스트 전부 통과 (demo:', ds.n, '건, 승률', ds.winRate.toFixed(1) + '%)');
+// 8) 무포지션: 손익 계산·통계 제외, 그날 매수와 안 겹침, 목표·손절 필드 없음
+const flats = demo.filter(t => t.status === 'flat');
+assert.ok(flats.length > 0, '샘플에 무포지션 있음');
+assert.strictEqual(C.calcTrade(flats[0], S), null);
+assert.strictEqual(C.computeStats(demo, S).n, ds.n, '무포지션·보유는 통계 제외');
+const buyDays = new Set(demo.filter(t => t.status !== 'flat').map(t => t.buyDate));
+assert.ok(flats.every(f => !buyDays.has(f.buyDate) && !f.name && !f.buyPrice), '무포지션 날엔 매수·종목 없음');
+assert.ok(demo.every(t => t.targetPct === undefined && t.stopPct === undefined), '목표·손절 필드 없음');
+assert.ok(C.DEFAULT_SETTINGS.flatTags.length > 0);
+
+console.log('OK — 손익/통계 테스트 전부 통과 (demo:', ds.n, '건, 승률', ds.winRate.toFixed(1) + '%, 무포지션', flats.length + '일)');

@@ -45,7 +45,15 @@ const short = (s, n = 160) => String(s).replace(/\s+/g, ' ').slice(0, n);
     const r = await run(`aiStructureThesis('변압기 수주 공시 나오고 거래대금 1위, 장 막판까지 신고가 유지. 외인 3일 연속 순매수. 내일 갭 3% 뜨면 반 팔고 마이너스면 9시5분 손절. 확신 4 정도', { name: 'HD현대일렉트릭' }, [])`);
     const bad = r.tags.filter(x => !run('settings.reasonTags').includes(x));
     if (bad.length) throw new Error('허용 목록 밖 태그: ' + bad);
-    return `${r.model} tags=${JSON.stringify(r.tags)} 목표=${r.targetPct} 손절=${r.stopPct} 확신=${r.confidence} 재료="${short(r.catalyst, 40)}" 시나리오="${short(r.scenario, 60)}"`;
+    return `${r.model} tags=${JSON.stringify(r.tags)} 확신=${r.confidence} 재료="${short(r.catalyst, 40)}" 시나리오="${short(r.scenario, 60)}"`;
+  });
+
+  await t('무포지션 이유 정리(JSON 검증)', async () => {
+    const r = await run(`aiStructureThesis('지수 막판에 밀리고 거래대금 상위가 다 테마 끝물이라 오늘은 쉼. 내일 CPI 보고 다시 판단', { mode: 'flat' }, [])`);
+    const bad = r.tags.filter(x => !run('settings.flatTags').includes(x));
+    if (bad.length) throw new Error('허용 목록 밖 태그: ' + bad);
+    if (r.confidence !== null) throw new Error('무포지션인데 확신도가 채워짐');
+    return `${r.model} tags=${JSON.stringify(r.tags)} 시장="${short(r.catalyst, 40)}" 내일="${short(r.scenario, 50)}"`;
   });
 
   await t('차트 이미지 입력', async () => {

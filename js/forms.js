@@ -1,4 +1,4 @@
-/* 트레이드북 입력 폼 — 매수 기록(근거 박제) / 결과·복기 기록 / 시황 메모 / 매매 상세 */
+/* 트레이드북 입력 폼 — 매수 기록 / 무포지션 기록(근거 박제) · 결과·복기 기록 · 시황 메모 · 상세 */
 'use strict';
 
 const numInput = (id, val, ph) => `<input id="${id}" type="text" inputmode="decimal" autocomplete="off" placeholder="${ph || ''}" value="${val === undefined || val === null || val === '' ? '' : fmtNum(val, String(val).includes('.') ? 2 : 0)}">`;
@@ -36,55 +36,87 @@ function bindStars() {
   const box = document.getElementById('f-conf');
   box.onclick = e => { const b = e.target.closest('button'); if (!b) return; const v = Number(b.dataset.v); const cur = Number(box.dataset.v || 0); const nv = cur === v ? 0 : v; box.dataset.v = nv; box.querySelectorAll('button').forEach(x => x.classList.toggle('on', Number(x.dataset.v) <= nv)); };
 }
+const isFlat = t => !!t && t.status === 'flat';
 function thesisBlock(t, title) {
-  return `<div class="thesis"><div class="stamp"><span>${title || '📌 매수 근거'}</span><span>${t.thesisAt ? stampLabel(t.thesisAt) + ' 기록' : ''}${t.thesisEditedAt ? ' · ' + stampLabel(t.thesisEditedAt) + ' 수정' : ''}</span></div>
+  const flat = isFlat(t);
+  const L = flat ? { cat: '시장', reason: '판단', scn: '내일' } : { cat: '재료', reason: '근거', scn: '시나리오' };
+  return `<div class="thesis"><div class="stamp"><span>${title || (flat ? '😴 무포지션 이유' : '📌 매수 근거')}</span><span>${t.thesisAt ? stampLabel(t.thesisAt) + ' 기록' : ''}${t.thesisEditedAt ? ' · ' + stampLabel(t.thesisEditedAt) + ' 수정' : ''}</span></div>
     ${(t.tags || []).length ? `<div class="chips">${t.tags.map(x => `<span class="chip static">${esc(x)}</span>`).join('')}</div>` : ''}
-    ${t.catalyst ? `<p><span class="k">재료</span>${esc(t.catalyst)}</p>` : ''}
-    ${t.reason ? `<p><span class="k">근거</span>${esc(t.reason)}</p>` : ''}
+    ${t.catalyst ? `<p><span class="k">${L.cat}</span>${esc(t.catalyst)}</p>` : ''}
+    ${t.reason ? `<p><span class="k">${L.reason}</span>${esc(t.reason)}</p>` : ''}
     ${planTxt(t) ? `<div class="plan-line"><span>${planTxt(t)}</span>${t.targetPct ? `<span class="muted">목표가 ${fmtNum(t.buyPrice * (1 + t.targetPct / 100))}</span>` : ''}${t.stopPct ? `<span class="muted">손절가 ${fmtNum(t.buyPrice * (1 + t.stopPct / 100))}</span>` : ''}</div>` : ''}
-    ${t.scenario ? `<p><span class="k">시나리오</span>${esc(t.scenario)}</p>` : ''}
+    ${t.scenario ? `<p><span class="k">${L.scn}</span>${esc(t.scenario)}</p>` : ''}
     ${t.confidence ? `<p><span class="k">확신도</span><span style="color:var(--warn)">${stars(t.confidence)}</span></p>` : ''}
-    ${!(t.tags || []).length && !t.catalyst && !t.reason ? '<p class="muted">근거 기록 없음</p>' : ''}
+    ${!(t.tags || []).length && !t.catalyst && !t.reason ? `<p class="muted">${flat ? '이유' : '근거'} 기록 없음</p>` : ''}
   </div>`;
 }
 
-/* ===== 매수 기록 (근거 박제) ===== */
+/* ===== 매수 / 무포지션 기록 (근거 박제) ===== */
 let formImgs = [];      // 이번 폼에서 새로 붙인 이미지 (취소 시 정리)
-let buyPasteHandler = null;   // 매수 폼의 Ctrl+V 이미지 붙여넣기 (폼이 바뀌면 교체)
-function openBuyForm(editId) {
+let buyPasteHandler = null;   // 폼의 Ctrl+V 이미지 붙여넣기 (폼이 바뀌면 교체)
+const FORM_TEXT = {
+  buy: { title: '＋ 매수 기록', date: '매수일', cat: '재료 · 뉴스', catPh: '한 줄로', reason: '근거 메모', reasonPh: '왜 샀나? 차트·수급·분위기',
+    scn: '내일 시나리오', scnPh: '갭상이면? 갭하락이면?', save: '근거 박제하기',
+    raw: '예) 변압기 수주 공시 나오고 거래대금 1위, 장 막판까지 신고가 유지. 내일 갭 3% 뜨면 반 팔고 마이너스면 9시5분 손절' },
+  flat: { title: '😴 무포지션 기록', date: '날짜', cat: '시장 상황', catPh: '예: 지수 장 막판 밀림, 주도 섹터 없음', reason: '판단 메모', reasonPh: '왜 쉬기로 했나? 봤던 후보·패스 이유',
+    scn: '내일 계획', scnPh: '내일 체크할 것', save: '무포지션 박제하기',
+    raw: '예) 지수 막판에 밀리고 거래대금 상위가 다 테마 끝물이라 패스. 내일 CPI 보고 다시' },
+};
+function openBuyForm(editId, startMode) {
   const t = editId ? JSON.parse(JSON.stringify(getTrade(editId))) : { id: uid(), status: 'open', strategy: settings.strategies[0], buyDate: todayStr(), tags: [], imgIds: [] };
+  let mode = isFlat(t) || startMode === 'flat' ? 'flat' : 'buy';
+  const canSwitch = t.status !== 'closed';      // 결과까지 기록된 매매는 무포지션으로 바꾸지 않음
   formImgs = [];
-  openSheet(editId ? '매수 근거 수정' : '＋ 매수 기록', `
-    ${chipGroup('f-strategy', settings.strategies, t.strategy, false)}
-    <div class="field suggest" style="margin-top:12px"><span>종목</span>
-      <input id="f-name" type="text" autocomplete="off" placeholder="종목명 또는 코드" value="${esc(t.name || '')}">
-      <div class="suggest-list" id="f-suggest" hidden></div>
-      <div class="hint" id="f-code-hint">${t.code ? esc(t.code) + ' · ' + (MARKET_LABEL[t.market] || '') : 'KRX 목록에서 자동완성 → 코드 자동 입력'}</div></div>
-    <div class="grid2"><label class="field"><span>매수가</span>${numInput('f-bp', t.buyPrice, '원')}</label>
-      <label class="field"><span>수량</span>${numInput('f-qty', t.qty, '주')}</label></div>
-    <div class="calc-line" id="f-amt">매수금액 -</div>
-    <label class="field"><span>매수일</span><input id="f-bd" type="date" value="${t.buyDate}"></label>
+  openSheet(FORM_TEXT[mode].title, `
+    <div class="seg" id="f-mode" style="display:${canSwitch ? 'grid' : 'none'};grid-template-columns:1fr 1fr;margin-bottom:14px">
+      <button type="button" data-v="buy">📈 매수</button><button type="button" data-v="flat">😴 무포지션</button></div>
+    <div id="f-buyonly">
+      ${chipGroup('f-strategy', settings.strategies, t.strategy, false)}
+      <div class="field suggest" style="margin-top:12px"><span>종목</span>
+        <input id="f-name" type="text" autocomplete="off" placeholder="종목명 또는 코드" value="${esc(t.name || '')}">
+        <div class="suggest-list" id="f-suggest" hidden></div>
+        <div class="hint" id="f-code-hint">${t.code ? esc(t.code) + ' · ' + (MARKET_LABEL[t.market] || '') : 'KRX 목록에서 자동완성 → 코드 자동 입력'}</div></div>
+      <div class="grid2"><label class="field"><span>매수가</span>${numInput('f-bp', t.buyPrice, '원')}</label>
+        <label class="field"><span>수량</span>${numInput('f-qty', t.qty, '주')}</label></div>
+      <div class="calc-line" id="f-amt">매수금액 -</div>
+    </div>
+    <label class="field"><span id="f-lab-date">매수일</span><input id="f-bd" type="date" value="${t.buyDate}"></label>
 
     <div class="ai-box"><span class="label">✨ 대충 쓰고 AI로 정리 <small>(폰 키보드 마이크로 말해도 됨)</small></span>
-      <textarea id="f-raw" placeholder="예) 변압기 수주 공시 나오고 거래대금 1위, 장 막판까지 신고가 유지. 내일 갭 3% 뜨면 반 팔고 마이너스면 9시5분 손절"></textarea>
-      <div class="btn-row" style="margin-top:8px"><button type="button" class="btn small accent" id="f-ai">AI로 항목 채우기</button><button type="button" class="btn small" id="f-news">뉴스 검색 ↗</button></div>
+      <textarea id="f-raw"></textarea>
+      <div class="btn-row" style="margin-top:8px"><button type="button" class="btn small accent" id="f-ai">AI로 항목 채우기</button><button type="button" class="btn small" id="f-news" data-buyonly>뉴스 검색 ↗</button></div>
       <div class="hint" id="f-ai-msg"></div></div>
 
-    <div class="field"><span>매수 근거 (탭해서 선택)</span>${chipGroup('f-tags', settings.reasonTags, t.tags || [], true, true)}</div>
-    <label class="field"><span>재료 · 뉴스</span><input id="f-cat" type="text" placeholder="한 줄로" value="${esc(t.catalyst || '')}"></label>
-    <label class="field"><span>근거 메모</span><textarea id="f-reason" placeholder="왜 샀나? 차트·수급·분위기">${esc(t.reason || '')}</textarea></label>
-    <div class="grid2"><label class="field"><span>목표 %</span>${numInput('f-tp', t.targetPct, '예: 3')}</label>
-      <label class="field"><span>손절 %</span>${numInput('f-sp', t.stopPct, '예: -2')}</label></div>
-    <div class="chips" style="margin:-4px 0 12px">${[2, 3, 5].map(v => `<button type="button" class="chip" data-tp="${v}">목표 +${v}%</button>`).join('')}${[-1.5, -2, -3].map(v => `<button type="button" class="chip" data-sp="${v}">손절 ${v}%</button>`).join('')}</div>
-    <label class="field"><span>내일 시나리오</span><textarea id="f-scn" placeholder="갭상이면? 갭하락이면?">${esc(t.scenario || '')}</textarea></label>
-    <div class="field"><span>확신도</span>${starsHTML(t.confidence)}</div>
-    <div class="field"><span>차트 캡처 <small>(캡처 후 <b>Ctrl+V</b> 또는 이미지 선택 — 블로그 카드에 들어감)</small></span>
+    <div class="field" data-buyonly><span>매수 근거 (탭해서 선택)</span>${chipGroup('f-tags', settings.reasonTags, isFlat(t) ? [] : (t.tags || []), true, true)}</div>
+    <div class="field" data-flatonly><span>무포지션 이유 (탭해서 선택)</span>${chipGroup('f-ftags', settings.flatTags, isFlat(t) ? (t.tags || []) : [], true, true)}</div>
+    <label class="field"><span id="f-lab-cat">재료 · 뉴스</span><input id="f-cat" type="text" value="${esc(t.catalyst || '')}"></label>
+    <label class="field"><span id="f-lab-reason">근거 메모</span><textarea id="f-reason">${esc(t.reason || '')}</textarea></label>
+    <label class="field"><span id="f-lab-scn">내일 시나리오</span><textarea id="f-scn">${esc(t.scenario || '')}</textarea></label>
+    <div class="field" data-buyonly><span>확신도</span>${starsHTML(t.confidence)}</div>
+    <div class="field"><span>차트 캡처 <small id="f-img-hint"></small></span>
       <div class="thumbs" id="f-thumbs"></div></div>
-    <div class="sheet-foot btn-row"><button type="button" class="btn primary block" id="f-save">${editId ? '수정 저장' : '근거 박제하기'}</button></div>
+    <div class="sheet-foot btn-row"><button type="button" class="btn primary block" id="f-save">저장</button></div>
   `, () => { formImgs.forEach(removeImage); formImgs = []; });
 
+  // 매수 ↔ 무포지션 전환: 종목·가격·수량·확신도는 매수일 때만, 라벨은 모드에 맞게
+  const applyMode = () => {
+    const T = FORM_TEXT[mode];
+    document.querySelectorAll('#f-mode button').forEach(b => b.classList.toggle('on', b.dataset.v === mode));
+    document.getElementById('sheet-title').textContent = editId ? T.title.replace(/^\S+ /, '') + ' 수정' : T.title;
+    document.getElementById('f-buyonly').hidden = mode !== 'buy';
+    document.querySelectorAll('#sheet-body [data-buyonly]').forEach(el => { el.hidden = mode !== 'buy'; });
+    document.querySelectorAll('#sheet-body [data-flatonly]').forEach(el => { el.hidden = mode !== 'flat'; });
+    [['f-lab-date', 'date'], ['f-lab-cat', 'cat'], ['f-lab-reason', 'reason'], ['f-lab-scn', 'scn']].forEach(([id, k]) => { document.getElementById(id).textContent = T[k]; });
+    document.getElementById('f-cat').placeholder = T.catPh; document.getElementById('f-reason').placeholder = T.reasonPh;
+    document.getElementById('f-scn').placeholder = T.scnPh; document.getElementById('f-raw').placeholder = T.raw;
+    document.getElementById('f-save').textContent = editId ? '수정 저장' : T.save;
+    document.getElementById('f-img-hint').innerHTML = '(캡처 후 <b>Ctrl+V</b> 또는 이미지 선택 — ' + (mode === 'flat' ? '상세 화면에서 확인' : '블로그 카드에 들어감') + ')';
+  };
+  document.getElementById('f-mode').onclick = e => { const b = e.target.closest('button'); if (!b) return; mode = b.dataset.v; applyMode(); };
+  applyMode();
+
   document.getElementById('f-conf').dataset.v = t.confidence || 0;
-  bindChips('f-strategy'); bindChips('f-tags', 'reasonTags'); bindStars(); bindCommaFormat(['f-bp', 'f-qty']);
+  bindChips('f-strategy'); bindChips('f-tags', 'reasonTags'); bindChips('f-ftags', 'flatTags'); bindStars(); bindCommaFormat(['f-bp', 'f-qty']);
   let code = t.code || '', market = t.market || '';
   // 종목 자동완성
   const nameEl = document.getElementById('f-name'), sug = document.getElementById('f-suggest');
@@ -103,8 +135,6 @@ function openBuyForm(editId) {
   nameEl.addEventListener('blur', () => setTimeout(() => { sug.hidden = true; }, 200));
   const upd = () => { const a = nval('f-bp') * nval('f-qty'); document.getElementById('f-amt').innerHTML = '매수금액 <b class="num">' + (isFinite(a) ? fmtNum(a) + '원' : '-') + '</b>'; };
   ['f-bp', 'f-qty'].forEach(id => document.getElementById(id).addEventListener('input', upd)); upd();
-  document.querySelectorAll('[data-tp]').forEach(b => b.onclick = () => { document.getElementById('f-tp').value = b.dataset.tp; });
-  document.querySelectorAll('[data-sp]').forEach(b => b.onclick = () => { document.getElementById('f-sp').value = b.dataset.sp; });
   // 차트 이미지
   const imgIds = [...(t.imgIds || [])];
   const addFiles = async files => {
@@ -146,20 +176,19 @@ function openBuyForm(editId) {
     e.preventDefault(); addFiles(files);
   };
   document.addEventListener('paste', buyPasteHandler);
-  // AI 정리
+  // AI 정리 (매수 근거 / 무포지션 이유)
   document.getElementById('f-ai').onclick = async () => {
     const raw = val('f-raw'), msg = document.getElementById('f-ai-msg');
     if (!raw && !imgIds.length) { msg.textContent = '메모를 쓰거나 차트 이미지를 붙여주세요'; return; }
     msg.innerHTML = '<span class="spinner"></span> 정리 중…';
     try {
       const srcs = (await Promise.all(imgIds.slice(0, 1).map(getImage))).filter(Boolean);
-      const r = await aiStructureThesis(raw || '(메모 없음 — 차트만 보고 셋업 정리)', { name: nameEl.value }, srcs);
-      setChips('f-tags', [...new Set([...chipVals('f-tags'), ...r.tags])]);
+      const r = await aiStructureThesis(raw || '(메모 없음 — 차트만 보고 정리)', { name: nameEl.value, mode }, srcs);
+      const tagBox = mode === 'flat' ? 'f-ftags' : 'f-tags';
+      setChips(tagBox, [...new Set([...chipVals(tagBox), ...r.tags])]);
       const fill = (id, v) => { const el = document.getElementById(id); if (v && !el.value.trim()) el.value = v; else if (v && el.value.trim() !== v) el.value = el.value.trim() + '\n' + v; };
       fill('f-cat', r.catalyst); fill('f-reason', r.reason); fill('f-scn', r.scenario);
-      if (r.targetPct !== null && !val('f-tp')) document.getElementById('f-tp').value = r.targetPct;
-      if (r.stopPct !== null && !val('f-sp')) document.getElementById('f-sp').value = r.stopPct;
-      if (r.confidence) { const box = document.getElementById('f-conf'); box.dataset.v = r.confidence; box.querySelectorAll('button').forEach(x => x.classList.toggle('on', Number(x.dataset.v) <= r.confidence)); }
+      if (mode === 'buy' && r.confidence) { const box = document.getElementById('f-conf'); box.dataset.v = r.confidence; box.querySelectorAll('button').forEach(x => x.classList.toggle('on', Number(x.dataset.v) <= r.confidence)); }
       msg.textContent = '채움 완료 (' + r.model + ') — 확인하고 고쳐서 저장';
     } catch (e) { msg.textContent = '실패: ' + e.message + ' (메모는 그대로 있음)'; }
   };
@@ -168,20 +197,30 @@ function openBuyForm(editId) {
     openNews(name);
   };
   function collect() {
-    return { strategy: chipVals('f-strategy')[0] || settings.strategies[0], name: nameEl.value.trim(), code, market,
-      buyPrice: nval('f-bp'), qty: nval('f-qty'), buyDate: val('f-bd'), tags: chipVals('f-tags'),
-      catalyst: val('f-cat'), reason: val('f-reason'), targetPct: isFinite(nval('f-tp')) ? nval('f-tp') : null,
-      stopPct: isFinite(nval('f-sp')) ? -Math.abs(nval('f-sp')) : null, scenario: val('f-scn'), confidence: Number(document.getElementById('f-conf').dataset.v) || null };
+    const common = { buyDate: val('f-bd'), catalyst: val('f-cat'), reason: val('f-reason'), scenario: val('f-scn') };
+    if (mode === 'flat') return { ...common, status: 'flat', tags: chipVals('f-ftags'),   // 종목·가격·예전 목표/손절/시각은 지움
+      strategy: undefined, name: undefined, code: undefined, market: undefined, buyPrice: undefined, qty: undefined, confidence: undefined,
+      targetPct: undefined, stopPct: undefined, buyTime: undefined };
+    return { ...common, ...(isFlat(t) ? { status: 'open' } : {}), strategy: chipVals('f-strategy')[0] || settings.strategies[0],
+      name: nameEl.value.trim(), code, market, buyPrice: nval('f-bp'), qty: nval('f-qty'), tags: chipVals('f-tags'),
+      confidence: Number(document.getElementById('f-conf').dataset.v) || null };
   }
   document.getElementById('f-save').onclick = () => {
     const d = collect();
-    if (!d.name) { toast('종목명을 입력하세요'); return; }
-    if (!(d.buyPrice > 0) || !(d.qty > 0)) { toast('매수가·수량을 입력하세요'); return; }
+    if (!d.buyDate) { toast('날짜를 입력하세요'); return; }   // 날짜 없으면 어느 화면에서도 못 찾음
+    if (mode === 'flat') {
+      if (!d.tags.length && !d.reason && !d.catalyst) { toast('무포지션 이유를 하나 이상 남겨주세요'); return; }
+    } else {
+      if (!d.name) { toast('종목명을 입력하세요'); return; }
+      if (!(d.buyPrice > 0) || !(d.qty > 0)) { toast('매수가·수량을 입력하세요'); return; }
+    }
     Object.assign(t, d, { imgIds });
     if (!t.thesisAt) t.thesisAt = Date.now();
     else if (Date.now() - t.thesisAt > 6 * 3600e3) t.thesisEditedAt = Date.now();   // 사후 수정 흔적 남김
     upsertTrade(t); formImgs = [];
-    closeSheet(true); toast(editId ? '수정됨' : '근거 박제 완료 — 내일 복기 대기에 표시됨'); rerenderActive();
+    closeSheet(true);
+    toast(editId ? '수정됨' : mode === 'flat' ? '무포지션 박제 완료' : '근거 박제 완료 — 내일 복기 대기에 표시됨');
+    rerenderActive();
   };
 }
 
@@ -234,9 +273,33 @@ function openDayNote(date) {
   document.getElementById('d-save').onclick = () => { setDayNote(date, val('d-note')); closeSheet(true); toast('저장됨'); rerenderActive(); };
 }
 
-/* ===== 매매 상세 ===== */
+/* ===== 매매 / 무포지션 상세 ===== */
+async function showDetailImages(t) {
+  const box = document.getElementById('dt-imgs'); if (!box) return;
+  const srcs = (await Promise.all((t.imgIds || []).map(getImage))).filter(Boolean);
+  box.innerHTML = srcs.map((s, i) => `<button type="button" class="thumb" data-i="${i}" style="padding:0;cursor:zoom-in"><img src="${s}" alt="차트"></button>`).join('');
+  // data: 주소는 새 탭으로 바로 못 열어서(브라우저 차단) blob 주소로 변환해 열기
+  box.querySelectorAll('[data-i]').forEach(b => b.onclick = async () => {
+    const blob = await (await fetch(srcs[b.dataset.i])).blob();
+    window.open(URL.createObjectURL(blob), '_blank');
+  });
+}
 async function openTradeDetail(id) {
   const t = getTrade(id); if (!t) return;
+  if (isFlat(t)) {
+    openSheet('😴 무포지션 · ' + mdLabel(t.buyDate), `
+      ${thesisBlock(t)}
+      <div class="thumbs" id="dt-imgs"></div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn" id="dt-edit">수정</button>
+        <button class="btn accent" id="dt-card">일일 카드</button>
+        <button class="btn danger" id="dt-del">삭제</button></div>`);
+    document.getElementById('dt-edit').onclick = () => openBuyForm(id);
+    document.getElementById('dt-card').onclick = () => openCard('day', t.buyDate);
+    document.getElementById('dt-del').onclick = () => { if (confirm(mdLabel(t.buyDate) + ' 무포지션 기록을 삭제할까요?')) { deleteTrade(id); closeSheet(true); toast('삭제됨'); rerenderActive(); } };
+    await showDetailImages(t);
+    return;
+  }
   const c = calcTrade(t, settings);
   openSheet(t.name + (t.code ? ' · ' + t.code : ''), `
     <div class="detail-top">${c ? `<div class="big ${pnlClass(c.net)}">${fmtPct(c.pct)}</div><div class="${pnlClass(c.net)} amt" style="font-weight:800">${amt(c.net)}</div>`
@@ -259,12 +322,10 @@ async function openTradeDetail(id) {
     <div class="btn-row" style="margin-top:8px">
       <button class="btn small" id="dt-news">뉴스 검색 ↗</button>
       <button class="btn small danger" id="dt-del">삭제</button></div>`);
-  const box = document.getElementById('dt-imgs');
-  const srcs = await Promise.all((t.imgIds || []).map(getImage));
-  box.innerHTML = srcs.map(s => s ? `<a class="thumb" href="${s}" target="_blank" rel="noopener"><img src="${s}" alt="차트"></a>` : '').join('');
   document.getElementById('dt-sell').onclick = () => openSellForm(id);
   document.getElementById('dt-edit').onclick = () => openBuyForm(id);
   document.getElementById('dt-card').onclick = () => openCard('trade', id);
   document.getElementById('dt-news').onclick = () => openNews(t.name);
   document.getElementById('dt-del').onclick = () => { if (confirm(t.name + ' 기록을 삭제할까요?')) { deleteTrade(id); closeSheet(true); toast('삭제됨'); rerenderActive(); } };
+  await showDetailImages(t);
 }

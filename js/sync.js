@@ -23,7 +23,7 @@ grant select, insert, update, delete on ${SB_TABLE} to anon;`;
 function loadJSON(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } }
 function normalizeSettings(s) {
   const out = Object.assign({}, DEFAULT_SETTINGS, s || {});
-  for (const k of ['strategies', 'reasonTags', 'mistakeTags']) if (!Array.isArray(out[k]) || !out[k].length) out[k] = [...DEFAULT_SETTINGS[k]];
+  for (const k of ['strategies', 'reasonTags', 'mistakeTags', 'flatTags']) if (!Array.isArray(out[k]) || !out[k].length) out[k] = [...DEFAULT_SETTINGS[k]];
   for (const k of ['feeBuy', 'feeSell', 'taxSell']) { const v = Number(out[k]); out[k] = isFinite(v) ? v : DEFAULT_SETTINGS[k]; }
   delete out.dataGoKey;   // 제거된 기능(공공데이터 시세)의 예전 설정값 정리
   if (out.geminiModel === 'gemini-flash-latest') out.geminiModel = DEFAULT_SETTINGS.geminiModel;   // 예전 기본값(무료 등급 혼잡 잦음) 교체

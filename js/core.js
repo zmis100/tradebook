@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS = {
     '이평선 지지', '장 막판 강세', '눌림목', '섹터 동반 강세', '미국장 연동'],
   mistakeTags: ['손절 지연', '추격 매수', '비중 과다', '계획 미준수', '뇌동 매매', '익절 너무 빠름',
     '갭하락 대응 미흡', '물타기'],
+  flatTags: ['지수 약세', '거래대금 부족', '마땅한 후보 없음', '변동성 과다', '이벤트 대기', '손실 후 휴식', '해외장 불안'],
   blogName: '',           // 블로그 카드 하단 서명
   styleSample: '',        // AI 블로그 초안용 내 글 샘플
   cardTheme: 'light',
@@ -205,21 +206,32 @@ function searchStocks(q, trades, limit = 8) {
 }
 const MARKET_LABEL = { P: '코스피', D: '코스닥', X: '코넥스' };
 
-/* ===== 샘플 데이터 (둘러보기용, demo:true 로 표시 → 설정에서 일괄 삭제) ===== */
+/* ===== 샘플 데이터 (둘러보기용, demo:true 로 표시 → 설정에서 일괄 삭제, 클라우드엔 안 올라감) ===== */
 function makeDemoData(baseDate) {
   const names = [['한화에어로스페이스', '012450', 'P'], ['HD현대일렉트릭', '267260', 'P'], ['알테오젠', '196170', 'D'],
     ['에코프로비엠', '247540', 'D'], ['SK하이닉스', '000660', 'P'], ['레인보우로보틱스', '277810', 'D'],
     ['두산에너빌리티', '034020', 'P'], ['리가켐바이오', '141080', 'D'], ['삼양식품', '003230', 'P'], ['펩트론', '087010', 'D']];
-  const reasons = DEFAULT_SETTINGS.reasonTags, mistakes = DEFAULT_SETTINGS.mistakeTags;
+  const reasons = DEFAULT_SETTINGS.reasonTags, mistakes = DEFAULT_SETTINGS.mistakeTags, flatReasons = DEFAULT_SETTINGS.flatTags;
   const catalysts = ['방산 수출 계약 기대감', '변압기 수주 공시', '기술이전 계약 뉴스', '2차전지 반등 + 외인 순매수',
     'HBM 공급 확대 보도', '로봇 테마 강세', '원전 수주 기대', '임상 결과 발표 앞둠', '수출 데이터 호조', '플랫폼 기술 계약'];
   const out = [];
-  let d = baseDate || todayStr(), seed = 7;
+  let seed = 7;
   const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
-  const prevBiz = x => { do { x = addDays(x, -1); } while (['토', '일'].includes(dowOf(x))); return x; };
-  d = prevBiz(d);
-  for (let i = 0; i < 34; i++) {
-    const sellDate = d, buyDate = prevBiz(d);
+  const weekend = x => ['토', '일'].includes(dowOf(x));
+  const prevBiz = x => { do { x = addDays(x, -1); } while (weekend(x)); return x; };
+  const nextBiz = x => { do { x = addDays(x, 1); } while (weekend(x)); return x; };
+  const y = prevBiz(baseDate || todayStr());       // 어제: 보유 중(복기 대기) 1건 매수
+  let day = prevBiz(y);                             // 그 전 영업일부터 거슬러 올라가며 매수일 생성
+  for (let i = 0; i < 40; i++, day = prevBiz(day)) {
+    if (i % 7 === 2) {                              // 가끔 무포지션 (그날은 매수 없음)
+      out.push({
+        id: uid(), demo: true, status: 'flat', buyDate: day, tags: [flatReasons[Math.floor(rnd() * flatReasons.length)]],
+        catalyst: '지수 장 막판 밀림, 주도 섹터 부재', reason: '후보 2개 봤지만 거래대금이 약해서 패스. 무리하지 않기.',
+        scenario: '내일 미국 지표 확인 후 재진입', thesisAt: new Date(day + 'T15:22:00').getTime(), updatedAt: Date.now(), deleted: false,
+      });
+      continue;
+    }
+    const buyDate = day, sellDate = nextBiz(day);
     const [name, code, market] = names[Math.floor(rnd() * names.length)];
     const buyPrice = Math.round((20000 + rnd() * 280000) / 50) * 50;
     const r = (rnd() - 0.42) * 9;                    // 약간 우상향 분포
@@ -229,12 +241,12 @@ function makeDemoData(baseDate) {
     const win = sellPrice > buyPrice;
     out.push({
       id: uid(), demo: true, status: 'closed', strategy: rnd() < 0.85 ? '종가베팅' : '스윙', name, code, market,
-      buyDate, buyTime: '15:2' + Math.floor(rnd() * 9), buyPrice, qty,
+      buyDate, buyPrice, qty,
       tags, catalyst: catalysts[Math.floor(rnd() * catalysts.length)],
       reason: '거래대금 터지면서 장 막판까지 고가 유지. 내일 시초 갭 기대.',
-      targetPct: 3, stopPct: -2, scenario: '갭상 3% 이상이면 시가 절반 매도, 갭하락이면 9:10까지 보고 손절',
+      scenario: '갭상 3% 이상이면 시가 절반 매도, 갭하락이면 9:10까지 보고 손절',
       confidence: 1 + Math.floor(rnd() * 5), thesisAt: new Date(buyDate + 'T15:2' + Math.floor(rnd() * 9) + ':00').getTime(),
-      sellDate, sellTime: '09:0' + Math.floor(rnd() * 9), sellPrice, sellQty: qty,
+      sellDate, sellPrice, sellQty: qty,
       thesisHit: win ? (rnd() < 0.7 ? 'O' : '△') : (rnd() < 0.6 ? 'X' : '△'),
       planKept: rnd() < 0.72 ? 'O' : 'X',
       mistakes: win ? [] : [mistakes[Math.floor(rnd() * mistakes.length)]],
@@ -242,16 +254,14 @@ function makeDemoData(baseDate) {
       lesson: win ? '거래대금 + 장 막판 강세 조합은 유효' : '갭하락이면 기계적으로 손절',
       reviewAt: new Date(sellDate + 'T09:30:00').getTime(), updatedAt: Date.now(), deleted: false,
     });
-    d = prevBiz(d);
   }
   // 복기 대기(보유 중) 1건 — 어제 매수
-  const y = prevBiz(baseDate || todayStr());
   out.push({
     id: uid(), demo: true, status: 'open', strategy: '종가베팅', name: 'HD현대일렉트릭', code: '267260', market: 'P',
-    buyDate: y, buyTime: '15:24', buyPrice: 412500, qty: 7, tags: ['거래대금 상위', '신고가 돌파', '외인·기관 수급'],
+    buyDate: y, buyPrice: 412500, qty: 7, tags: ['거래대금 상위', '신고가 돌파', '외인·기관 수급'],
     catalyst: '북미 변압기 대형 수주 공시 + 외인 3일 연속 순매수',
     reason: '장중 신고가 돌파 후 눌림 없이 마감. 전력기기 섹터 동반 강세라 내일 시초 갭 확률 높다고 판단.',
-    targetPct: 4, stopPct: -2.5, scenario: '시가 +2% 이상 → 절반 익절 후 나머지 고점 추적 / 시가 마이너스 → 9:05 저점 이탈 시 전량 손절',
+    scenario: '시가 +2% 이상 → 절반 익절 후 나머지 고점 추적 / 시가 마이너스 → 9:05 저점 이탈 시 전량 손절',
     confidence: 4, thesisAt: new Date(y + 'T15:24:00').getTime(), updatedAt: Date.now(), deleted: false,
   });
   return out;
