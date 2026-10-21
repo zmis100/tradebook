@@ -41,6 +41,11 @@ const CARD_CSS = `
 .bc-img{width:100%;border-radius:14px;display:block;border:1px solid var(--b-line)}
 .bc-img+.bc-img{margin-top:12px}
 .bc-panel+.bc-imgs{margin-top:14px}
+.bc-sec .bc-imgs:not(:last-child){margin-bottom:14px}
+.bc-cap{font-size:15px;font-weight:800;color:var(--b-muted);margin:12px 0 8px}
+.bc-item{border-bottom:1px solid var(--b-line);padding-bottom:16px}
+.bc-item:last-child{border-bottom:0;padding-bottom:0}
+.bc-item>.bc-row{border-bottom:0}
 .bc-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
 .bc-cal .w{text-align:center;font-size:13px;color:var(--b-muted);font-weight:700}
 .bc-cal .c{background:var(--b-panel);border-radius:10px;min-height:62px;padding:6px 7px;display:flex;flex-direction:column;justify-content:space-between}
@@ -74,6 +79,19 @@ function thesisPanel(t) {
   </div>`;
 }
 
+/* 첨부 사진 묶음 (세로로 이어 붙임, caption 있으면 위에 작은 제목) */
+const cardImgs = (srcs, caption) => (srcs || []).length
+  ? `<div class="bc-imgs">${caption ? `<div class="bc-cap">${caption}</div>` : ''}${srcs.map(s => `<img class="bc-img" src="${s}" alt="">`).join('')}</div>` : '';
+/* 일일 카드에 들어가는 매매: 그날 청산 / 그날 진입(같은 날 사고 판 건 청산 쪽에만) / 무포지션 */
+function dayParts(date) {
+  const live = liveTrades();
+  const closed = sortClosed(live.filter(t => t.status === 'closed' && t.sellDate === date));
+  const opened = live.filter(t => t.buyDate === date && t.status !== 'flat' && !(t.status === 'closed' && t.sellDate === date))
+    .sort((a, b) => (a.buyTime || '').localeCompare(b.buyTime || ''));
+  const flats = live.filter(t => t.buyDate === date && t.status === 'flat');
+  return { closed, opened, flats };
+}
+
 /* ---- 매매 1건 ---- */
 function tradeCardHTML(t, o) {
   const c = calcTrade(t, settings);
@@ -85,24 +103,22 @@ function tradeCardHTML(t, o) {
     `<div class="bc-hero"><div><div class="big" style="font-size:40px">매수 ${fmtNum(t.buyPrice)}원</div>${o.masked ? '' : `<div class="amt">${fmtNum(t.qty)}주</div>`}</div></div>`;
   const thesis = `<div class="bc-sec"><div class="bc-sec-t">📌 ${c ? (c.holdDays <= 3 ? '전일 매수 근거' : '매수 당시 근거') : '매수 근거'} <small>${t.thesisAt ? stampLabel(t.thesisAt) + ' 기록' : ''}</small></div>${thesisPanel(t)}</div>`;
   // 첨부 이미지 전부: 매수 시점 → 근거 아래, 매도·결과 → 복기 아래 (세로로 이어 붙임)
-  const imgList = srcs => (srcs || []).length ? `<div class="bc-imgs">${srcs.map(s => `<img class="bc-img" src="${s}" alt="">`).join('')}</div>` : '';
-  const img = (o.buyImgs || []).length ? `<div class="bc-sec">${imgList(o.buyImgs)}</div>` : '';
+  const img = (o.buyImgs || []).length ? `<div class="bc-sec">${cardImgs(o.buyImgs)}</div>` : '';
   const result = c ? `<div class="bc-sec"><div class="bc-sec-t">📊 결과 · 복기 <small>${mdLabel(t.sellDate)} ${esc(t.sellTime || '')}</small></div>
     <div class="bc-panel">
       <div class="bc-badges" style="margin-top:0">${t.thesisHit ? `<span class="bc-badge">${HIT_LABEL[t.thesisHit]}</span>` : ''}${t.planKept ? `<span class="bc-badge">${t.planKept === 'O' ? '계획대로 대응 O' : '계획 이탈 X'}</span>` : ''}<span class="bc-badge">보유 ${c.holdDays}일</span></div>
       ${t.review ? `<p>${esc(t.review)}</p>` : ''}
       ${(t.mistakes || []).length ? `<div class="bc-chips" style="margin-top:10px">${t.mistakes.map(x => `<span class="bc-chip miss">${esc(x)}</span>`).join('')}</div>` : ''}
       ${t.lesson ? `<p><span class="bc-k">배운 점</span><b>${esc(t.lesson)}</b></p>` : ''}
-    </div>${imgList(o.sellImgs)}</div>` : '';
+    </div>${cardImgs(o.sellImgs)}</div>` : '';
   return cardShell(o, head + hero + thesis + img + result);
 }
 
 /* ---- 일일 카드 ---- */
 function dayCardHTML(date, o) {
   const live = liveTrades();
-  const closed = sortClosed(live.filter(t => t.status === 'closed' && t.sellDate === date));
-  const opened = live.filter(t => t.buyDate === date && t.status !== 'flat').sort((a, b) => (a.buyTime || '').localeCompare(b.buyTime || ''));
-  const flats = live.filter(t => t.buyDate === date && t.status === 'flat');
+  const { closed, opened, flats } = dayParts(date);
+  const pics = id => (o.imgMap || {})[id] || {};   // cardHTML에서 미리 읽어 둔 첨부 사진
   const st = computeStats(closed, settings), mst = computeStats(closedIn(live, ymOf(date)), settings);
   const note = getDayNote(date);
   const head = `<div class="bc-kicker">종가베팅 매매일지</div><div class="bc-title">${date.slice(0, 4)}.${date.slice(5, 7)}.${date.slice(8)} (${dowOf(date)})</div>`;
@@ -112,10 +128,12 @@ function dayCardHTML(date, o) {
       <div style="text-align:right"><div class="bc-sub" style="margin:0">${Number(date.slice(5, 7))}월 누적</div><div style="font-size:24px;font-weight:800" class="${pnlClass(mst.net)}">${o.masked ? '승률 ' + mst.winRate.toFixed(0) + '%' : fmtCompact(mst.net)}</div></div></div>` : '';
   const closedSec = closed.length ? `<div class="bc-sec"><div class="bc-sec-t">📊 전일 종베 결과</div>${closed.map(t => {
     const c = calcTrade(t, settings);
-    return `<div class="bc-row"><div style="min-width:0"><div class="n">${esc(t.name)}</div>
+    const row = `<div class="bc-row"><div style="min-width:0"><div class="n">${esc(t.name)}</div>
       <div class="d">${esc([(t.tags || []).slice(0, 3).join(' · '), t.catalyst].filter(Boolean).join(' / '))}</div>
       <div class="d"><b>${t.thesisHit ? HIT_LABEL[t.thesisHit] : ''}</b>${t.lesson ? ' — ' + esc(t.lesson) : ''}</div></div>
       <div class="r ${pnlClass(c.net)}">${fmtPct(c.pct)}${o.masked ? '' : `<small>${fmtSigned(c.net)}</small>`}</div></div>`;
+    const p = pics(t.id), photos = cardImgs(p.buy, '📌 매수 시점') + cardImgs(p.sell, '📊 매도·결과');
+    return photos ? `<div class="bc-item">${row}${photos}</div>` : row;
   }).join('')}</div>` : '';
   const openSec = opened.length ? `<div class="bc-sec"><div class="bc-sec-t">📌 오늘 진입 (내일 결과)</div>${opened.map(t => `
     <div class="bc-panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:21px">${esc(t.name)}</b>
@@ -124,14 +142,14 @@ function dayCardHTML(date, o) {
       ${t.catalyst ? `<p><span class="bc-k">재료</span>${esc(t.catalyst)}</p>` : ''}
       ${t.reason ? `<p><span class="bc-k">근거</span>${esc(t.reason)}</p>` : ''}
       ${planTxt(t) || t.scenario ? `<p><span class="bc-k">계획</span><b>${planTxt(t)}</b>${t.scenario ? (planTxt(t) ? '<br>' : '') + esc(t.scenario) : ''}</p>` : ''}
-    </div>`).join('')}</div>` : '';
+    </div>${cardImgs(pics(t.id).buy)}`).join('')}</div>` : '';
   const flatSec = flats.length ? `<div class="bc-sec"><div class="bc-sec-t">😴 오늘 무포지션 <small>${flats[0].thesisAt ? stampLabel(flats[0].thesisAt) + ' 기록' : ''}</small></div>${flats.map(t => `
     <div class="bc-panel" style="margin-bottom:10px">
       ${(t.tags || []).length ? `<div class="bc-chips">${t.tags.map(x => `<span class="bc-chip">${esc(x)}</span>`).join('')}</div>` : ''}
       ${t.catalyst ? `<p><span class="bc-k">시장</span>${esc(t.catalyst)}</p>` : ''}
       ${t.reason ? `<p><span class="bc-k">판단</span>${esc(t.reason)}</p>` : ''}
       ${t.scenario ? `<p><span class="bc-k">내일</span>${esc(t.scenario)}</p>` : ''}
-    </div>`).join('')}</div>` : '';
+    </div>${cardImgs(pics(t.id).buy)}`).join('')}</div>` : '';
   const noteSec = note ? `<div class="bc-sec"><div class="bc-sec-t">📝 시황 메모</div><div class="bc-panel"><p style="margin:0">${esc(note)}</p></div></div>` : '';
   const empty = !closed.length && !opened.length && !flats.length && !note ? `<div class="bc-panel" style="margin-top:20px">이 날짜 기록이 없음</div>` : '';
   return cardShell(o, head + hero + closedSec + openSec + flatSec + noteSec + empty);
@@ -198,13 +216,14 @@ let cardState = null;
 async function openCard(kind, payload) {
   cardState = { kind, payload, theme: settings.cardTheme || 'light', masked: document.body.classList.contains('masked'), withBuyImg: true, withSellImg: true };
   const t = kind === 'trade' ? getTrade(payload) : null;
+  const imgTrades = t ? [t] : kind === 'day' ? (p => [...p.closed, ...p.opened, ...p.flats])(dayParts(payload)) : [];
   const title = kind === 'trade' ? '블로그 카드 — ' + t.name : kind === 'day' ? '일일 카드 — ' + mdLabel(payload) : '결산 카드 — ' + ymLabel(payload);
   openSheet(title, `
     <div class="row wrap" style="margin-bottom:10px">
       <div class="seg" id="cd-theme"><button data-v="light">라이트</button><button data-v="dark">다크</button></div>
       <button class="chip" id="cd-mask">금액 숨김</button>
-      ${t && (t.imgIds || []).length ? '<button class="chip" id="cd-bimg">매수 캡처</button>' : ''}
-      ${t && (t.sellImgIds || []).length ? '<button class="chip" id="cd-simg">매도 캡처</button>' : ''}
+      ${imgTrades.some(x => (x.imgIds || []).length) ? '<button class="chip" id="cd-bimg">매수 캡처</button>' : ''}
+      ${imgTrades.some(x => (x.sellImgIds || []).length) ? '<button class="chip" id="cd-simg">매도 캡처</button>' : ''}
     </div>
     <div class="card-preview-wrap" id="cd-wrap"><div class="card-preview-scale" id="cd-prev"></div></div>
     <div class="sheet-foot btn-row">
@@ -230,13 +249,22 @@ async function openCard(kind, payload) {
 }
 async function cardHTML() {
   const { kind, payload } = cardState, o = { theme: cardState.theme, masked: cardState.masked };
+  const load = (on, ids) => on ? Promise.all((ids || []).map(getImage)).then(a => a.filter(Boolean)) : [];
   if (kind === 'trade') {
     const t = getTrade(payload);
-    const load = (on, ids) => on ? Promise.all((ids || []).map(getImage)).then(a => a.filter(Boolean)) : [];
     [o.buyImgs, o.sellImgs] = await Promise.all([load(cardState.withBuyImg, t.imgIds), load(cardState.withSellImg, t.sellImgIds)]);
     return tradeCardHTML(t, o);
   }
-  return kind === 'day' ? dayCardHTML(payload, o) : monthCardHTML(payload, o);
+  if (kind === 'day') {   // 그날 카드에 나오는 매매들의 사진을 미리 읽어 둠 (매도 사진은 청산된 매매만)
+    const p = dayParts(payload);
+    o.imgMap = {};
+    await Promise.all([...p.closed, ...p.opened, ...p.flats].map(async t => {
+      const [buy, sell] = await Promise.all([load(cardState.withBuyImg, t.imgIds), load(cardState.withSellImg && t.status === 'closed', t.sellImgIds)]);
+      o.imgMap[t.id] = { buy, sell };
+    }));
+    return dayCardHTML(payload, o);
+  }
+  return monthCardHTML(payload, o);
 }
 async function renderPreview() {
   const prev = document.getElementById('cd-prev'), wrap = document.getElementById('cd-wrap');

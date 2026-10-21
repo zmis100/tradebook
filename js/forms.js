@@ -180,7 +180,7 @@ function openBuyForm(editId, startMode) {
     document.getElementById('f-cat').placeholder = T.catPh; document.getElementById('f-reason').placeholder = T.reasonPh;
     document.getElementById('f-scn').placeholder = T.scnPh; document.getElementById('f-raw').placeholder = T.raw;
     document.getElementById('f-save').textContent = editId ? '수정 저장' : T.save;
-    document.getElementById('f-img-hint').innerHTML = '(캡처 후 <b>Ctrl+V</b> 또는 이미지 선택 — ' + (mode === 'flat' ? '상세 화면에서 확인' : '블로그 카드에 들어감') + ')';
+    document.getElementById('f-img-hint').innerHTML = '(캡처 후 <b>Ctrl+V</b> 또는 이미지 선택 — ' + (mode === 'flat' ? '블로그 일일 카드에 들어감' : '블로그 카드에 들어감') + ')';
   };
   document.getElementById('f-mode').onclick = e => { const b = e.target.closest('button'); if (!b) return; mode = b.dataset.v; applyMode(); };
   applyMode();
