@@ -106,10 +106,10 @@ function tradeBrief(t) {
 
 /* 2) 블로그 글 초안 (네이버 블로그 붙여넣기용 — 마크다운 기호 없이) */
 async function aiBlogDraft(date, masked) {
-  const live = liveTrades();
-  const closed = live.filter(t => t.status === 'closed' && t.sellDate === date).map(tradeBrief);
-  const opened = live.filter(t => t.buyDate === date && t.status !== 'flat').map(tradeBrief);
-  const flats = live.filter(t => t.buyDate === date && t.status === 'flat')
+  const p = dayParts(date);   // 일일 카드와 같은 기준 — 같은 날 사고 판 매매는 청산 쪽에만 한 번
+  const closed = p.closed.map(tradeBrief);
+  const opened = p.opened.map(tradeBrief);
+  const flats = p.flats
     .map(t => ({ 무포지션이유: t.tags, 시장: t.catalyst, 판단: t.reason, 내일계획: t.scenario, 기록시각: t.thesisAt ? stampLabel(t.thesisAt) : '' }));
   if (masked) [...closed, ...opened].forEach(b => { delete b.매수; delete b.매도; });
   const prompt = `내 매매 기록으로 ${date} 매매일지 블로그 글 초안을 써줘.
