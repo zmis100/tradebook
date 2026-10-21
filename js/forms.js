@@ -51,9 +51,79 @@ function thesisBlock(t, title) {
   </div>`;
 }
 
+/* ===== 이미지 첨부 칸 (매수·결과 폼 공용) — 파일 선택 · ⧉ 붙여넣기 · Ctrl+V, 장수 제한 없음
+   폼마다 자기 상태: 취소하면 새로 붙인 것만 지우고, 뺀 기존 사진은 저장할 때만 지움 ===== */
+let activeImageField = null;   // 지금 열린 폼의 첨부 칸 (Ctrl+V 대상)
+function mountImageField(boxId, ids, tradeId) {
+  if (activeImageField) activeImageField.cancel();   // 저장 없이 바뀐 이전 폼 정리
+  const added = [], removed = [];
+  let adding = 0, alive = true, rseq = 0;
+  const render = async () => {
+    const my = ++rseq;
+    const srcs = await Promise.all(ids.map(getImage));
+    const box = document.getElementById(boxId);
+    if (!box || my !== rseq) return;                 // 더 최근에 시작한 그리기가 있으면 양보
+    box.innerHTML = ids.map((id, i) => `<div class="thumb"><img src="${srcs[i] || ''}" alt=""><button type="button" data-rm="${id}" aria-label="삭제">✕</button></div>`).join('') +
+      '<label class="thumb-add">＋ 이미지<input type="file" accept="image/*" multiple hidden></label>' +
+      (navigator.clipboard && navigator.clipboard.read ? '<button type="button" class="thumb-add" data-paste>⧉ 붙여넣기</button>' : '');
+    const fi = box.querySelector('input[type=file]');
+    fi.onchange = () => addFiles([...fi.files]);
+    const pb = box.querySelector('[data-paste]');
+    if (pb) pb.onclick = async () => {
+      try {
+        const files = [];
+        for (const it of await navigator.clipboard.read()) {
+          const type = it.types.find(x => x.startsWith('image/'));
+          if (type) files.push(new File([await it.getType(type)], 'chart.' + type.split('/')[1], { type }));
+        }
+        if (files.length) addFiles(files); else toast('클립보드에 이미지가 없음 — 캡처 먼저');
+      } catch (e) { toast('클립보드 권한이 필요함 — PC는 Ctrl+V로 붙여넣기'); }
+    };
+    box.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
+      const id = b.dataset.rm, i = ids.indexOf(id);
+      if (i < 0) return;                                       // 빠른 연속 클릭: 이미 뺀 사진
+      ids.splice(i, 1); b.closest('.thumb').remove();
+      const j = added.indexOf(id);
+      if (j >= 0) { added.splice(j, 1); removeImage(id); }     // 방금 붙인 것 → 바로 지움
+      else if (!removed.includes(id)) removed.push(id);        // 저장돼 있던 것 → 저장할 때 지움
+    });
+  };
+  const addFiles = async files => {
+    if (!files.length || !alive) return;
+    adding++; let n = 0;
+    try {
+      for (const f of files) {
+        const id = await addImage(f, tradeId);
+        if (!alive) { removeImage(id); break; }                // 그사이 폼을 닫았으면 되돌림
+        ids.push(id); added.push(id); n++;
+        render();                                              // 한 장씩 바로 보이게
+      }
+    } catch (e) { toast('이미지 추가 실패: ' + e.message); }
+    finally { adding--; }
+    if (n && alive) toast(`이미지 ${n}장 추가됨`);
+  };
+  // 캡처 → Ctrl+V: 이 폼이 열려 있을 때만 (글자 칸에 글자 붙여넣기는 그대로 둠)
+  const onPaste = e => {
+    if (!alive || document.getElementById('sheet').hidden || !document.getElementById(boxId)) return;
+    const cd = e.clipboardData; if (!cd) return;
+    const files = [...cd.items].filter(i => i.kind === 'file' && i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
+    if (!files.length) return;
+    if ([...cd.types].includes('text/plain') && /INPUT|TEXTAREA/.test((e.target || {}).tagName)) return;
+    e.preventDefault(); addFiles(files);
+  };
+  document.addEventListener('paste', onPaste);
+  const field = {
+    busy: () => adding > 0,
+    detach() { alive = false; document.removeEventListener('paste', onPaste); if (activeImageField === field) activeImageField = null; },
+    cancel() { field.detach(); added.splice(0).forEach(removeImage); },
+    commit() { field.detach(); removed.splice(0).forEach(removeImage); },
+  };
+  activeImageField = field;
+  render();
+  return field;
+}
+
 /* ===== 매수 / 무포지션 기록 (근거 박제) ===== */
-let formImgs = [];      // 이번 폼에서 새로 붙인 이미지 (취소 시 정리)
-let buyPasteHandler = null;   // 폼의 Ctrl+V 이미지 붙여넣기 (폼이 바뀌면 교체)
 const FORM_TEXT = {
   buy: { title: '＋ 매수 기록', date: '매수일', cat: '재료 · 뉴스', catPh: '한 줄로', reason: '근거 메모', reasonPh: '왜 샀나? 차트·수급·분위기',
     scn: '내일 시나리오', scnPh: '갭상이면? 갭하락이면?', save: '근거 박제하기',
@@ -66,7 +136,7 @@ function openBuyForm(editId, startMode) {
   const t = editId ? JSON.parse(JSON.stringify(getTrade(editId))) : { id: uid(), status: 'open', strategy: settings.strategies[0], buyDate: todayStr(), tags: [], imgIds: [] };
   let mode = isFlat(t) || startMode === 'flat' ? 'flat' : 'buy';
   const canSwitch = t.status !== 'closed';      // 결과까지 기록된 매매는 무포지션으로 바꾸지 않음
-  formImgs = [];
+  let imgField = null;
   openSheet(FORM_TEXT[mode].title, `
     <div class="seg" id="f-mode" style="display:${canSwitch ? 'grid' : 'none'};grid-template-columns:1fr 1fr;margin-bottom:14px">
       <button type="button" data-v="buy">📈 매수</button><button type="button" data-v="flat">😴 무포지션</button></div>
@@ -96,7 +166,7 @@ function openBuyForm(editId, startMode) {
     <div class="field"><span>차트 캡처 <small id="f-img-hint"></small></span>
       <div class="thumbs" id="f-thumbs"></div></div>
     <div class="sheet-foot btn-row"><button type="button" class="btn primary block" id="f-save">저장</button></div>
-  `, () => { formImgs.forEach(removeImage); formImgs = []; });
+  `, () => imgField && imgField.cancel());
 
   // 매수 ↔ 무포지션 전환: 종목·가격·수량·확신도는 매수일 때만, 라벨은 모드에 맞게
   const applyMode = () => {
@@ -135,47 +205,9 @@ function openBuyForm(editId, startMode) {
   nameEl.addEventListener('blur', () => setTimeout(() => { sug.hidden = true; }, 200));
   const upd = () => { const a = nval('f-bp') * nval('f-qty'); document.getElementById('f-amt').innerHTML = '매수금액 <b class="num">' + (isFinite(a) ? fmtNum(a) + '원' : '-') + '</b>'; };
   ['f-bp', 'f-qty'].forEach(id => document.getElementById(id).addEventListener('input', upd)); upd();
-  // 차트 이미지
+  // 차트 이미지 (장수 제한 없음)
   const imgIds = [...(t.imgIds || [])];
-  const addFiles = async files => {
-    const room = 3 - imgIds.length;
-    if (room <= 0) { toast('차트 이미지는 3장까지'); return; }
-    for (const f of files.slice(0, room)) { const id = await addImage(f, t.id); imgIds.push(id); formImgs.push(id); }
-    renderThumbs(); toast('차트 이미지 추가됨');
-  };
-  const renderThumbs = async () => {
-    const box = document.getElementById('f-thumbs'); if (!box) return;
-    const srcs = await Promise.all(imgIds.map(getImage));
-    box.innerHTML = imgIds.map((id, i) => `<div class="thumb"><img src="${srcs[i] || ''}" alt=""><button type="button" data-rm="${id}" aria-label="삭제">✕</button></div>`).join('') +
-      (imgIds.length < 3 ? '<label class="thumb-add">＋ 이미지<input type="file" accept="image/*" multiple hidden id="f-file"></label>' +
-        (navigator.clipboard && navigator.clipboard.read ? '<button type="button" class="thumb-add" id="f-paste">⧉ 붙여넣기</button>' : '') : '');
-    const fi = document.getElementById('f-file');
-    if (fi) fi.onchange = () => addFiles([...fi.files]);
-    const pb = document.getElementById('f-paste');
-    if (pb) pb.onclick = async () => {
-      try {
-        const files = [];
-        for (const it of await navigator.clipboard.read()) {
-          const type = it.types.find(x => x.startsWith('image/'));
-          if (type) files.push(new File([await it.getType(type)], 'chart.' + type.split('/')[1], { type }));
-        }
-        if (files.length) addFiles(files); else toast('클립보드에 이미지가 없음 — 캡처 먼저');
-      } catch (e) { toast('클립보드 권한이 필요함 — PC는 Ctrl+V로 붙여넣기'); }
-    };
-    box.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { const id = b.dataset.rm; imgIds.splice(imgIds.indexOf(id), 1); removeImage(id); formImgs = formImgs.filter(x => x !== id); renderThumbs(); });
-  };
-  renderThumbs();
-  // 캡처 → Ctrl+V: 폼 어디서든 이미지 붙여넣기 (글자 칸에 글자 붙여넣기는 그대로 둠)
-  if (buyPasteHandler) document.removeEventListener('paste', buyPasteHandler);
-  buyPasteHandler = e => {
-    if (!document.getElementById('f-thumbs')) { document.removeEventListener('paste', buyPasteHandler); buyPasteHandler = null; return; }
-    const cd = e.clipboardData; if (!cd) return;
-    const files = [...cd.items].filter(i => i.kind === 'file' && i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
-    if (!files.length) return;
-    if ([...cd.types].includes('text/plain') && /INPUT|TEXTAREA/.test((e.target || {}).tagName)) return;
-    e.preventDefault(); addFiles(files);
-  };
-  document.addEventListener('paste', buyPasteHandler);
+  imgField = mountImageField('f-thumbs', imgIds, t.id);
   // AI 정리 (매수 근거 / 무포지션 이유)
   document.getElementById('f-ai').onclick = async () => {
     const raw = val('f-raw'), msg = document.getElementById('f-ai-msg');
@@ -206,6 +238,7 @@ function openBuyForm(editId, startMode) {
       confidence: Number(document.getElementById('f-conf').dataset.v) || null };
   }
   document.getElementById('f-save').onclick = () => {
+    if (imgField.busy()) { toast('이미지 추가 중 — 끝나면 저장해주세요'); return; }
     const d = collect();
     if (!d.buyDate) { toast('날짜를 입력하세요'); return; }   // 날짜 없으면 어느 화면에서도 못 찾음
     if (mode === 'flat') {
@@ -217,7 +250,7 @@ function openBuyForm(editId, startMode) {
     Object.assign(t, d, { imgIds });
     if (!t.thesisAt) t.thesisAt = Date.now();
     else if (Date.now() - t.thesisAt > 6 * 3600e3) t.thesisEditedAt = Date.now();   // 사후 수정 흔적 남김
-    upsertTrade(t); formImgs = [];
+    upsertTrade(t); imgField.commit();
     closeSheet(true);
     toast(editId ? '수정됨' : mode === 'flat' ? '무포지션 박제 완료' : '근거 박제 완료 — 내일 복기 대기에 표시됨');
     rerenderActive();
@@ -228,6 +261,7 @@ function openBuyForm(editId, startMode) {
 function openSellForm(id) {
   const t = JSON.parse(JSON.stringify(getTrade(id)));
   const editing = t.status === 'closed';
+  let imgField = null;
   openSheet((editing ? '결과 수정 — ' : '결과 기록 — ') + t.name, `
     ${thesisBlock(t, '📌 ' + mdLabel(t.buyDate) + '의 내가 적은 근거')}
     <div class="pos-meta" style="margin:-2px 0 12px">매수 ${fmtNum(t.buyPrice)}원 × ${fmtNum(t.qty)}주 · ${mdLabel(t.buyDate)} ${esc(t.buyTime || '')}</div>
@@ -243,8 +277,12 @@ function openSellForm(id) {
     <div class="field"><span>실수 (있으면)</span>${chipGroup('s-mis', settings.mistakeTags, t.mistakes || [], true, true)}</div>
     <label class="field"><span>복기</span><textarea id="s-rev" placeholder="시초가 흐름, 대응, 결과">${esc(t.review || '')}</textarea></label>
     <label class="field"><span>배운 점 한 줄</span><input id="s-les" type="text" value="${esc(t.lesson || '')}" placeholder="다음에 똑같이 할 것 / 하지 말 것"></label>
-    <div class="sheet-foot btn-row"><button type="button" class="btn primary block" id="s-save">${editing ? '수정 저장' : '결과 저장'}</button></div>`);
+    <div class="field"><span>매도·결과 캡처 <small>(캡처 후 <b>Ctrl+V</b> 또는 이미지 선택 — 블로그 카드 결과 아래에 들어감)</small></span>
+      <div class="thumbs" id="s-thumbs"></div></div>
+    <div class="sheet-foot btn-row"><button type="button" class="btn primary block" id="s-save">${editing ? '수정 저장' : '결과 저장'}</button></div>`, () => imgField && imgField.cancel());
   bindSeg('s-hit'); bindSeg('s-plan'); bindChips('s-mis', 'mistakeTags'); bindCommaFormat(['s-sp', 's-qty', 's-man']);
+  const sellImgIds = [...(t.sellImgIds || [])];
+  imgField = mountImageField('s-thumbs', sellImgIds, t.id);
   const calc = () => {
     const tmp = { ...t, status: 'closed', sellPrice: nval('s-sp'), sellQty: nval('s-qty'), netManual: val('s-man') === '' ? null : nval('s-man') };
     const c = isFinite(tmp.sellPrice) && tmp.sellPrice > 0 ? calcTrade(tmp, settings) : null;
@@ -252,13 +290,14 @@ function openSellForm(id) {
   };
   ['s-sp', 's-qty', 's-man'].forEach(i => document.getElementById(i).addEventListener('input', calc)); calc();
   document.getElementById('s-save').onclick = () => {
+    if (imgField.busy()) { toast('이미지 추가 중 — 끝나면 저장해주세요'); return; }
     const sp = nval('s-sp'), sq = nval('s-qty');
     if (!(sp > 0)) { toast('매도가를 입력하세요'); return; }
     if (!(sq > 0) || sq > t.qty) { toast('매도 수량 확인 (1 ~ ' + t.qty + ')'); return; }
     Object.assign(t, { status: 'closed', sellPrice: sp, sellQty: sq, sellDate: val('s-sd'),
       netManual: val('s-man') === '' ? null : nval('s-man'), thesisHit: segVal('s-hit'), planKept: segVal('s-plan'),
-      mistakes: chipVals('s-mis'), review: val('s-rev'), lesson: val('s-les'), reviewAt: t.reviewAt || Date.now() });
-    upsertTrade(t); closeSheet(true); rerenderActive();
+      mistakes: chipVals('s-mis'), review: val('s-rev'), lesson: val('s-les'), sellImgIds, reviewAt: t.reviewAt || Date.now() });
+    upsertTrade(t); imgField.commit(); closeSheet(true); rerenderActive();
     const c = calcTrade(t, settings);
     toast(`저장 — ${t.name} ${fmtPct(c.pct)}`);
     setTimeout(() => openTradeDetail(t.id), 250);
@@ -274,9 +313,9 @@ function openDayNote(date) {
 }
 
 /* ===== 매매 / 무포지션 상세 ===== */
-async function showDetailImages(t) {
-  const box = document.getElementById('dt-imgs'); if (!box) return;
-  const srcs = (await Promise.all((t.imgIds || []).map(getImage))).filter(Boolean);
+async function showImages(boxId, ids) {
+  const box = document.getElementById(boxId); if (!box) return;
+  const srcs = (await Promise.all((ids || []).map(getImage))).filter(Boolean);
   box.innerHTML = srcs.map((s, i) => `<button type="button" class="thumb" data-i="${i}" style="padding:0;cursor:zoom-in"><img src="${s}" alt="차트"></button>`).join('');
   // data: 주소는 새 탭으로 바로 못 열어서(브라우저 차단) blob 주소로 변환해 열기
   box.querySelectorAll('[data-i]').forEach(b => b.onclick = async () => {
@@ -297,7 +336,7 @@ async function openTradeDetail(id) {
     document.getElementById('dt-edit').onclick = () => openBuyForm(id);
     document.getElementById('dt-card').onclick = () => openCard('day', t.buyDate);
     document.getElementById('dt-del').onclick = () => { if (confirm(mdLabel(t.buyDate) + ' 무포지션 기록을 삭제할까요?')) { deleteTrade(id); closeSheet(true); toast('삭제됨'); rerenderActive(); } };
-    await showDetailImages(t);
+    await showImages('dt-imgs', t.imgIds);
     return;
   }
   const c = calcTrade(t, settings);
@@ -314,7 +353,8 @@ async function openTradeDetail(id) {
     <div class="thumbs" id="dt-imgs"></div>
     ${c ? `<div class="thesis"><div class="stamp"><span>📊 복기</span><span>${t.reviewAt ? stampLabel(t.reviewAt) : ''}</span></div>
       <div class="chips">${t.thesisHit ? `<span class="chip static">${HIT_LABEL[t.thesisHit]}</span>` : ''}${t.planKept ? `<span class="chip static">${t.planKept === 'O' ? '계획대로 O' : '계획 이탈 X'}</span>` : ''}${(t.mistakes || []).map(m => `<span class="chip static">${esc(m)}</span>`).join('')}</div>
-      ${t.review ? `<p>${esc(t.review)}</p>` : ''}${t.lesson ? `<p><span class="k">배운 점</span><b>${esc(t.lesson)}</b></p>` : ''}</div>` : ''}
+      ${t.review ? `<p>${esc(t.review)}</p>` : ''}${t.lesson ? `<p><span class="k">배운 점</span><b>${esc(t.lesson)}</b></p>` : ''}
+      <div class="thumbs" id="dt-simgs" style="margin-top:8px"></div></div>` : ''}
     <div class="btn-row" style="margin-top:12px">
       <button class="btn ${c ? '' : 'primary'}" id="dt-sell">${c ? '결과 수정' : '결과 기록'}</button>
       <button class="btn" id="dt-edit">근거 수정</button>
@@ -327,5 +367,5 @@ async function openTradeDetail(id) {
   document.getElementById('dt-card').onclick = () => openCard('trade', id);
   document.getElementById('dt-news').onclick = () => openNews(t.name);
   document.getElementById('dt-del').onclick = () => { if (confirm(t.name + ' 기록을 삭제할까요?')) { deleteTrade(id); closeSheet(true); toast('삭제됨'); rerenderActive(); } };
-  await showDetailImages(t);
+  await Promise.all([showImages('dt-imgs', t.imgIds), showImages('dt-simgs', t.sellImgIds)]);
 }

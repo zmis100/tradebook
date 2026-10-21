@@ -39,6 +39,8 @@ const CARD_CSS = `
 .bc-badges{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
 .bc-badge{font-size:15px;font-weight:800;border-radius:8px;padding:4px 10px;background:var(--b-bg);border:1.5px solid var(--b-line)}
 .bc-img{width:100%;border-radius:14px;display:block;border:1px solid var(--b-line)}
+.bc-img+.bc-img{margin-top:12px}
+.bc-panel+.bc-imgs{margin-top:14px}
 .bc-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
 .bc-cal .w{text-align:center;font-size:13px;color:var(--b-muted);font-weight:700}
 .bc-cal .c{background:var(--b-panel);border-radius:10px;min-height:62px;padding:6px 7px;display:flex;flex-direction:column;justify-content:space-between}
@@ -82,14 +84,16 @@ function tradeCardHTML(t, o) {
     <div class="bc-flow num">${fmtNum(t.buyPrice)}<span class="arrow">→</span>${fmtNum(t.sellPrice)}</div></div>` :
     `<div class="bc-hero"><div><div class="big" style="font-size:40px">매수 ${fmtNum(t.buyPrice)}원</div>${o.masked ? '' : `<div class="amt">${fmtNum(t.qty)}주</div>`}</div></div>`;
   const thesis = `<div class="bc-sec"><div class="bc-sec-t">📌 ${c ? (c.holdDays <= 3 ? '전일 매수 근거' : '매수 당시 근거') : '매수 근거'} <small>${t.thesisAt ? stampLabel(t.thesisAt) + ' 기록' : ''}</small></div>${thesisPanel(t)}</div>`;
-  const img = o.imgSrc ? `<div class="bc-sec"><img class="bc-img" src="${o.imgSrc}" alt=""></div>` : '';
+  // 첨부 이미지 전부: 매수 시점 → 근거 아래, 매도·결과 → 복기 아래 (세로로 이어 붙임)
+  const imgList = srcs => (srcs || []).length ? `<div class="bc-imgs">${srcs.map(s => `<img class="bc-img" src="${s}" alt="">`).join('')}</div>` : '';
+  const img = (o.buyImgs || []).length ? `<div class="bc-sec">${imgList(o.buyImgs)}</div>` : '';
   const result = c ? `<div class="bc-sec"><div class="bc-sec-t">📊 결과 · 복기 <small>${mdLabel(t.sellDate)} ${esc(t.sellTime || '')}</small></div>
     <div class="bc-panel">
       <div class="bc-badges" style="margin-top:0">${t.thesisHit ? `<span class="bc-badge">${HIT_LABEL[t.thesisHit]}</span>` : ''}${t.planKept ? `<span class="bc-badge">${t.planKept === 'O' ? '계획대로 대응 O' : '계획 이탈 X'}</span>` : ''}<span class="bc-badge">보유 ${c.holdDays}일</span></div>
       ${t.review ? `<p>${esc(t.review)}</p>` : ''}
       ${(t.mistakes || []).length ? `<div class="bc-chips" style="margin-top:10px">${t.mistakes.map(x => `<span class="bc-chip miss">${esc(x)}</span>`).join('')}</div>` : ''}
       ${t.lesson ? `<p><span class="bc-k">배운 점</span><b>${esc(t.lesson)}</b></p>` : ''}
-    </div></div>` : '';
+    </div>${imgList(o.sellImgs)}</div>` : '';
   return cardShell(o, head + hero + thesis + img + result);
 }
 
@@ -192,14 +196,15 @@ function drawCardCharts(root, kind, payload, o) {
 /* ---- 미리보기 + 저장/복사/공유 ---- */
 let cardState = null;
 async function openCard(kind, payload) {
-  cardState = { kind, payload, theme: settings.cardTheme || 'light', masked: document.body.classList.contains('masked'), withImg: true };
+  cardState = { kind, payload, theme: settings.cardTheme || 'light', masked: document.body.classList.contains('masked'), withBuyImg: true, withSellImg: true };
   const t = kind === 'trade' ? getTrade(payload) : null;
   const title = kind === 'trade' ? '블로그 카드 — ' + t.name : kind === 'day' ? '일일 카드 — ' + mdLabel(payload) : '결산 카드 — ' + ymLabel(payload);
   openSheet(title, `
     <div class="row wrap" style="margin-bottom:10px">
       <div class="seg" id="cd-theme"><button data-v="light">라이트</button><button data-v="dark">다크</button></div>
       <button class="chip" id="cd-mask">금액 숨김</button>
-      ${t && (t.imgIds || []).length ? '<button class="chip" id="cd-img">차트 이미지</button>' : ''}
+      ${t && (t.imgIds || []).length ? '<button class="chip" id="cd-bimg">매수 캡처</button>' : ''}
+      ${t && (t.sellImgIds || []).length ? '<button class="chip" id="cd-simg">매도 캡처</button>' : ''}
     </div>
     <div class="card-preview-wrap" id="cd-wrap"><div class="card-preview-scale" id="cd-prev"></div></div>
     <div class="sheet-foot btn-row">
@@ -210,11 +215,14 @@ async function openCard(kind, payload) {
   const sync = () => {
     document.querySelectorAll('#cd-theme button').forEach(b => b.classList.toggle('on', b.dataset.v === cardState.theme));
     document.getElementById('cd-mask').classList.toggle('on', cardState.masked);
-    const ib = document.getElementById('cd-img'); if (ib) ib.classList.toggle('on', cardState.withImg);
+    const bb = document.getElementById('cd-bimg'); if (bb) bb.classList.toggle('on', cardState.withBuyImg);
+    const sb = document.getElementById('cd-simg'); if (sb) sb.classList.toggle('on', cardState.withSellImg);
   };
   document.querySelectorAll('#cd-theme button').forEach(b => b.onclick = () => { cardState.theme = b.dataset.v; settings.cardTheme = b.dataset.v; saveSettings(); sync(); renderPreview(); });
   document.getElementById('cd-mask').onclick = () => { cardState.masked = !cardState.masked; sync(); renderPreview(); };
-  const ib = document.getElementById('cd-img'); if (ib) ib.onclick = () => { cardState.withImg = !cardState.withImg; sync(); renderPreview(); };
+  // 매수·매도 캡처 따로 끄기 (예: 금액 숨김일 때 체결 화면 캡처만 빼기)
+  const bb = document.getElementById('cd-bimg'); if (bb) bb.onclick = () => { cardState.withBuyImg = !cardState.withBuyImg; sync(); renderPreview(); };
+  const sbi = document.getElementById('cd-simg'); if (sbi) sbi.onclick = () => { cardState.withSellImg = !cardState.withSellImg; sync(); renderPreview(); };
   document.getElementById('cd-save').onclick = () => exportCard('save');
   document.getElementById('cd-copy').onclick = () => exportCard('copy');
   const sb = document.getElementById('cd-share'); if (sb) sb.onclick = () => exportCard('share');
@@ -224,7 +232,8 @@ async function cardHTML() {
   const { kind, payload } = cardState, o = { theme: cardState.theme, masked: cardState.masked };
   if (kind === 'trade') {
     const t = getTrade(payload);
-    if (cardState.withImg && (t.imgIds || []).length) o.imgSrc = await getImage(t.imgIds[0]);
+    const load = (on, ids) => on ? Promise.all((ids || []).map(getImage)).then(a => a.filter(Boolean)) : [];
+    [o.buyImgs, o.sellImgs] = await Promise.all([load(cardState.withBuyImg, t.imgIds), load(cardState.withSellImg, t.sellImgIds)]);
     return tradeCardHTML(t, o);
   }
   return kind === 'day' ? dayCardHTML(payload, o) : monthCardHTML(payload, o);
@@ -237,7 +246,11 @@ async function renderPreview() {
   prev.style.transform = `scale(${scale})`; prev.style.width = '720px';
   // 차트는 원본 크기로 그린 뒤 축소 표시
   drawCardCharts(prev, cardState.kind, cardState.payload, cardState);
+  await imagesReady(prev);   // 첨부 이미지가 다 읽힌 뒤 높이를 재야 미리보기가 잘리지 않음
   wrap.style.height = Math.ceil(prev.firstElementChild.offsetHeight * scale) + 'px';
+}
+function imagesReady(root) {
+  return Promise.all([...root.querySelectorAll('img')].map(img => (img.decode ? img.decode() : Promise.resolve()).catch(() => {})));
 }
 async function renderCardCanvas() {
   if (typeof html2canvas === 'undefined') throw new Error('캡처 라이브러리 로드 실패 (인터넷 연결 확인)');
@@ -247,9 +260,16 @@ async function renderCardCanvas() {
   document.body.appendChild(stage);
   drawCardCharts(stage, cardState.kind, cardState.payload, cardState);
   if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  await imagesReady(stage);
   try {
     const el = stage.firstElementChild;
-    return await html2canvas(el, { scale: 2, backgroundColor: getComputedStyle(el).backgroundColor, useCORS: true, logging: false });
+    // 사진이 많아 아주 길어지면 브라우저 캔버스 한계(높이 약 32,000px)를 넘지 않게 배율을 낮춤
+    const h = Math.max(1, el.offsetHeight), ua = navigator.userAgent;
+    let scale = Math.min(2, 30000 / h);
+    if (/iPhone|iPad|iPod/.test(ua) || (/Safari/.test(ua) && !/Chrome|Chromium|Edg|Android/.test(ua)))
+      scale = Math.min(scale, Math.sqrt(16e6 / (720 * h)));   // 아이폰·사파리는 캔버스 면적 한도(약 1,670만 픽셀)
+    scale = Math.max(scale, 0.5);
+    return await html2canvas(el, { scale, backgroundColor: getComputedStyle(el).backgroundColor, useCORS: true, logging: false });
   } finally { stage.remove(); }
 }
 function cardFileName() {
