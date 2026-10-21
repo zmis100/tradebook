@@ -25,8 +25,9 @@ run(`gemini = async ({ prompt }) => ({ text: prompt, model: 'stub', sources: [] 
   const r = await run(`aiBlogDraft('2026-10-21', false)`);
   const rec = JSON.parse(r.text.slice(r.text.indexOf('기록(JSON):') + '기록(JSON):'.length).trim());
   const names = arr => arr.map(x => x.종목);
-  assert.deepStrictEqual(names(rec.전일결과).sort(), ['당일매매', '전일종베'], '청산 결과에 두 매매');
-  assert.deepStrictEqual(names(rec.오늘진입), ['오늘진입종목'], '오늘 진입엔 새로 산 것만 (당일매매 제외)');
+  assert.deepStrictEqual(names(rec.청산결과).sort(), ['당일매매', '전일종베'], '청산 결과에 두 매매');
+  assert.deepStrictEqual(names(rec.신규진입), ['오늘진입종목'], '신규 진입엔 새로 산 것만 (당일매매 제외)');
+  assert.ok(!/전일 종가베팅|오늘 신규 진입/.test(r.text), '구성 지시도 통일된 이름 사용');
   assert.strictEqual(rec.무포지션.length, 1, '무포지션 1건');
   assert.strictEqual((r.text.match(/당일매매/g) || []).length, 1, '당일매매는 프롬프트에 한 번만');
   console.log('OK — AI 블로그 초안 기록 테스트 통과 (당일 매매 1회, 오늘 진입 1건, 무포지션 1건)');

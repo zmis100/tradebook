@@ -64,7 +64,7 @@ async function aiStructureThesis(raw, ctx, imgSrcs) {
   const allowed = flat ? settings.flatTags : settings.reasonTags;
   const img = imgSrcs.length ? ' (첨부: 차트 캡처)' : '';
   const prompt = flat
-    ? `아래는 내가 오늘 종가베팅을 하지 않고 무포지션으로 쉬기로 하면서 대충 적은 메모다${img}.
+    ? `아래는 내가 오늘 매수하지 않고 무포지션으로 쉬기로 하면서 대충 적은 메모다${img}.
 매매일지 항목으로 정리해서 JSON 하나만 출력해.
 {
  "tags": [아래 목록에서 메모 내용에 해당하는 것만 고름],
@@ -80,7 +80,7 @@ async function aiStructureThesis(raw, ctx, imgSrcs) {
  "tags": [아래 목록에서 메모 내용에 해당하는 것만 고름],
  "catalyst": "재료/뉴스 한 줄 (메모에 없으면 빈 문자열)",
  "reason": "매수 근거 2~3문장. 차트 이미지가 있으면 보이는 셋업(추세·이평선·거래량·캔들)을 1문장 덧붙임",
- "scenario": "내일 시나리오별 대응 (메모에 없으면 빈 문자열)",
+ "scenario": "대응 계획 — 갭상·갭하락·익절·손절 때 어떻게 할지 (메모에 없으면 빈 문자열)",
  "confidence": 1~5 (메모의 확신 정도, 알 수 없으면 null)
 }
 태그 목록: ${JSON.stringify(allowed)}
@@ -99,8 +99,8 @@ function tradeBrief(t) {
   const c = calcTrade(t, settings);
   return {
     종목: t.name, 전략: t.strategy, 매수: `${t.buyDate} ${t.buyTime || ''} ${t.buyPrice}원`, 근거태그: t.tags, 재료: t.catalyst, 근거: t.reason,
-    계획: planTxt(t), 시나리오: t.scenario, 확신도: t.confidence, 근거기록시각: t.thesisAt ? stampLabel(t.thesisAt) : '',
-    ...(c ? { 매도: `${t.sellDate} ${t.sellTime || ''} ${t.sellPrice}원`, 수익률: fmtPct(c.pct), 근거적중: t.thesisHit, 계획이행: t.planKept, 실수: t.mistakes, 복기: t.review, 배운점: t.lesson } : {}),
+    목표손절: planTxt(t), 대응계획: t.scenario, 확신도: t.confidence, 근거기록시각: t.thesisAt ? stampLabel(t.thesisAt) : '',
+    ...(c ? { 매도: `${t.sellDate} ${t.sellTime || ''} ${t.sellPrice}원`, 수익률: fmtPct(c.pct), 근거적중: t.thesisHit, 계획대로: t.planKept, 실수: t.mistakes, 복기: t.review, 배운점: t.lesson } : {}),
   };
 }
 
@@ -113,10 +113,10 @@ async function aiBlogDraft(date, masked) {
     .map(t => ({ 무포지션이유: t.tags, 시장: t.catalyst, 판단: t.reason, 내일계획: t.scenario, 기록시각: t.thesisAt ? stampLabel(t.thesisAt) : '' }));
   if (masked) [...closed, ...opened].forEach(b => { delete b.매수; delete b.매도; });
   const prompt = `내 매매 기록으로 ${date} 매매일지 블로그 글 초안을 써줘.
-구성: 제목 1줄 → 전일 종가베팅 결과(전일에 적어둔 매수 근거를 먼저, 그다음 실제 결과와 복기) → 오늘 신규 진입 종목과 근거·내일 계획 (무포지션이면 쉬기로 한 이유와 내일 계획) → 시황 메모 → 마무리 한두 줄.
+구성(문단 제목은 이 이름 그대로): 제목 1줄 → 청산 결과(매수 때 적어둔 근거를 먼저, 그다음 실제 결과와 복기) → 신규 진입(종목·근거·대응 계획) 또는 무포지션(쉬기로 한 이유·내일 계획) → 시황 메모 → 마무리 한두 줄.
 규칙: 마크다운 기호(#, **, -) 쓰지 말고 ■ ▶ 같은 기호와 줄바꿈으로 구분. 기록에 없는 내용은 지어내지 말고, 기록이 없는 구성은 건너뛸 것. ${masked ? '금액·수량은 쓰지 말고 수익률만.' : ''}
 ${settings.styleSample ? '말투는 아래 내 예전 글과 비슷하게:\n"""' + settings.styleSample.slice(0, 1500) + '"""' : '말투: 담백한 개인 일지체.'}
-기록(JSON): ${JSON.stringify({ 전일결과: closed, 오늘진입: opened, 무포지션: flats, 시황메모: getDayNote(date) })}`;
+기록(JSON): ${JSON.stringify({ 청산결과: closed, 신규진입: opened, 무포지션: flats, 시황메모: getDayNote(date) })}`;
   return gemini({ prompt, temperature: 0.6 });
 }
 
@@ -129,7 +129,7 @@ async function aiMonthCoach(ym) {
   const prompt = `${ymLabel(ym)} 내 매매 결과를 분석해줘.
 요약: 매매 ${st.n}회, 승률 ${st.winRate.toFixed(1)}%, 손익비 ${isFinite(st.payoff) ? st.payoff.toFixed(2) : '∞'}, 평균수익 ${fmtPct(st.avgWinPct)}, 평균손실 ${fmtPct(st.avgLossPct)}, 기대값 ${fmtPct(st.expectancy)}, 최대연패 ${st.maxLossStreak}
 무포지션: ${new Set(flats.map(t => t.buyDate)).size}일${flats.length ? ' (이유: ' + [...new Set(flats.flatMap(t => t.tags || []))].join(', ') + ')' : ''}
-매매 목록 [청산일, 종목, 수익률%, 근거태그, 실수태그, 근거적중(O/△/X), 계획이행(O/X), 확신도]:
+매매 목록 [청산일, 종목, 수익률%, 근거태그, 실수태그, 근거적중(O/△/X), 계획대로(O/X), 확신도]:
 ${rows.map(r => JSON.stringify(r)).join('\n')}
 출력 형식(마크다운 기호 없이):
 ■ 잘한 점 (2개)

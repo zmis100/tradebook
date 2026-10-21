@@ -7,7 +7,7 @@ const ratioTxt = v => v === Infinity ? '∞' : isFinite(v) ? v.toFixed(2) : '-';
 function tradeRowHTML(t) {
   if (t.status === 'flat') return `<button class="trade-row" data-open="${t.id}">
     <div class="tr-main"><div class="tr-name">😴 무포지션</div><div class="tr-sub">${esc([(t.tags || []).slice(0, 3).join(' · '), t.catalyst].filter(Boolean).join(' / ')) || '&nbsp;'}</div></div>
-    <div class="tr-pnl"><small class="muted">관망</small></div></button>`;
+    <div class="tr-pnl"><small class="muted">—</small></div></button>`;
   const c = calcTrade(t, settings);
   const sub = [t.strategy, (t.tags || []).slice(0, 2).join(' · ')].filter(Boolean).join(' · ');
   return `<button class="trade-row" data-open="${t.id}">
@@ -21,8 +21,8 @@ function renderHome() {
   const el = document.getElementById('tab-home'), live = liveTrades(), today = todayStr();
   if (!live.length) {
     el.innerHTML = `<div class="card empty" style="padding:32px 18px">
-      <div style="font-size:40px">📒</div><h3 style="justify-content:center;font-size:18px;margin-top:8px">종가베팅 매매일지</h3>
-      <p class="sub" style="font-size:14px;line-height:1.7">① 매수 직후 <b>근거를 30초 안에 박제</b><br>② 다음 날 그 근거를 보면서 <b>결과·복기</b><br>③ 블로그용 <b>카드 이미지</b>와 <b>월간 결산</b>은 자동</p>
+      <div style="font-size:40px">📒</div><h3 style="justify-content:center;font-size:18px;margin-top:8px">매매일지</h3>
+      <p class="sub" style="font-size:14px;line-height:1.7">① 매수 직후 <b>근거를 30초 안에 박제</b><br>② 매도 후 그 근거를 보면서 <b>결과·복기</b><br>③ 블로그용 <b>카드 이미지</b>와 <b>월간 결산</b>은 자동</p>
       <div class="btn-row" style="max-width:360px;margin:16px auto 0"><button class="btn primary" id="h-first">＋ 첫 매수 기록</button><button class="btn" id="h-demo">샘플로 둘러보기</button></div></div>`;
     document.getElementById('h-first').onclick = () => openBuyForm();
     document.getElementById('h-demo').onclick = loadDemo;
@@ -41,18 +41,18 @@ function renderHome() {
       <div><span>손익비</span><b>${st.n ? ratioTxt(st.payoff) : '-'}</b></div>
       <div><span>매매</span><b>${st.n}회</b></div></div></div>
 
-    <div class="sec-title">⏳ 복기 대기 <span class="count">${open.length}건 · 어제의 내가 남긴 근거</span></div>
+    <div class="sec-title">⏳ 복기 대기 <span class="count">${open.length}건 · 매수 때 남긴 근거</span></div>
     ${open.length ? open.map(t => `<div class="card pending">
       <div class="pos-head"><div><div class="pos-name">${esc(t.name)}</div><div class="pos-meta">${esc(t.strategy || '')} · ${mdLabel(t.buyDate)} ${esc(t.buyTime || '')} · ${fmtNum(t.buyPrice)}원 × <span class="amt">${masked() ? '•••' : fmtNum(t.qty)}</span></div></div>
       <button class="btn small ghost" data-open="${t.id}">상세</button></div>
       ${thesisBlock(t)}
       <button class="btn primary block" data-sell="${t.id}">결과 기록하기</button></div>`).join('')
-      : '<div class="card empty">보유 중인 종목 없음 — 종베 들어가면 ＋기록 (쉬는 날은 무포지션으로 이유만)</div>'}
+      : '<div class="card empty">보유 중인 종목 없음 — 매수하면 ＋기록 (쉬는 날은 무포지션으로 이유만)</div>'}
 
     <div class="sec-title">📝 오늘 <span class="count">${closedToday.length + open.filter(t => t.buyDate === today).length + flatToday.length}건</span></div>
     <div class="card">
-      ${closedToday.length ? `<div class="label">오늘 청산</div>${closedToday.map(tradeRowHTML).join('')}` : ''}
-      ${flatToday.length ? `<div class="label">오늘 무포지션</div>${flatToday.map(tradeRowHTML).join('')}` : ''}
+      ${closedToday.length ? `<div class="label">📊 청산 결과</div>${closedToday.map(tradeRowHTML).join('')}` : ''}
+      ${flatToday.length ? `<div class="label">😴 무포지션</div>${flatToday.map(tradeRowHTML).join('')}` : ''}
       <div class="label" style="margin-top:6px">시황 메모</div>
       ${note ? `<div class="thesis" style="margin-top:0"><p style="margin:0">${esc(note)}</p></div>` : '<p class="muted" style="margin:0 0 10px;font-size:14px">오늘 시장 분위기·내일 체크할 것</p>'}
       <div class="btn-row"><button class="btn small" id="h-note">${note ? '메모 수정' : '메모 쓰기'}</button>
@@ -126,7 +126,7 @@ function renderStats() {
   for (let i = 0; i < first; i++) cal += '<div class="cell blank"></div>';
   for (let d = 1; d <= last; d++) {
     const ds = statsYm + '-' + pad2(d), v = st.byDay[ds], flat = flatDays.has(ds);
-    cal += `<button class="cell ${v ? pnlClass(v.net) : ''} ${ds === today ? 'today' : ''}" ${v || flat ? `data-day="${ds}"` : 'tabindex="-1"'} aria-label="${ds}${v ? ' ' + fmtSigned(v.net) : ''}${flat ? ' 무포지션' : ''}"><span class="d">${d}${flat ? ' 😴' : ''}</span>${v ? `<span class="v ${pnlClass(v.net)}">${masked() ? v.wins + '/' + v.n : fmtCompact(v.net)}</span>` : flat ? '<span class="v muted">관망</span>' : ''}</button>`;
+    cal += `<button class="cell ${v ? pnlClass(v.net) : ''} ${ds === today ? 'today' : ''}" ${v || flat ? `data-day="${ds}"` : 'tabindex="-1"'} aria-label="${ds}${v ? ' ' + fmtSigned(v.net) : ''}${flat ? ' 무포지션' : ''}"><span class="d">${d}${flat ? ' 😴' : ''}</span>${v ? `<span class="v ${pnlClass(v.net)}">${masked() ? v.wins + '/' + v.n : fmtCompact(v.net)}</span>` : ''}</button>`;
   }
   el.innerHTML = `
     <div class="month-nav"><button class="icon-btn" data-sym="-1" aria-label="이전 달">◀</button><strong>${ymLabel(statsYm)} 결산</strong><button class="icon-btn" data-sym="1" aria-label="다음 달">▶</button></div>
@@ -151,11 +151,11 @@ function renderStats() {
       <div class="card"><h3>손실 키운 실수 <span class="muted" style="font-size:12px">손실 합계</span></h3>${hbarsHTML(st.byMistake.filter(g => g.net < 0).sort((a, b) => a.net - b.net), 'loss')}</div>
     </div>
     <div class="card" style="margin-top:12px"><h3>과정 점검 <span class="muted" style="font-size:12px">근거를 지키면 결과가 좋은가</span></h3>
-      <div class="scroll-x">${perfTable([[st.byPlan, '계획 이행'], [st.byThesis, '근거 적중'], [st.byConfidence, '확신도'], [st.byStrategy, '전략']])}</div>
+      <div class="scroll-x">${perfTable([[st.byPlan, '계획대로 여부'], [st.byThesis, '근거 적중'], [st.byConfidence, '확신도'], [st.byStrategy, '전략']])}</div>
       ${st.n ? '' : '<p class="muted" style="margin:0;font-size:13px">청산된 매매가 쌓이면 표시</p>'}</div>
     <div class="card"><h3>${year}년 월별 손익</h3><div class="chart-box"><canvas id="c-year"></canvas></div>
       <details class="tv"><summary>표로 보기</summary><table class="table"><thead><tr><th>월</th><th>매매</th><th>승률</th><th>손익</th></tr></thead><tbody>${ym12.filter(r => r.n).map(r => `<tr><td>${Number(r.ym.slice(5))}월</td><td>${r.n}</td><td>${r.winRate.toFixed(0)}%</td><td class="${pnlClass(r.net)} amt">${amt(r.net)}</td></tr>`).join('') || '<tr><td colspan="4">데이터 없음</td></tr>'}</tbody></table></details></div>
-    <div class="card"><h3>이 달 매매 전체 <span class="count muted" style="font-size:12px">${st.n}건</span></h3><div class="scroll-x"><table class="table"><thead><tr><th>청산일</th><th>종목</th><th>수익률</th><th>손익</th><th>근거</th></tr></thead><tbody>
+    <div class="card"><h3>이 달 매매 전체 <span class="count muted" style="font-size:12px">${st.n}건</span></h3><div class="scroll-x"><table class="table"><thead><tr><th>청산일</th><th>종목</th><th>수익률</th><th>손익</th><th>근거 적중</th></tr></thead><tbody>
       ${st.rows.map(r => `<tr data-open="${r.t.id}" style="cursor:pointer"><td>${mdLabel(r.t.sellDate)}</td><td style="text-align:left">${esc(r.t.name)}</td><td class="${pnlClass(r.c.net)}">${fmtPct(r.c.pct)}</td><td class="${pnlClass(r.c.net)} amt">${amt(r.c.net)}</td><td>${r.t.thesisHit || ''}</td></tr>`).join('')}</tbody></table></div></div>`;
 
   el.querySelectorAll('[data-sym]').forEach(b => b.onclick = () => { statsYm = addMonths(statsYm, Number(b.dataset.sym)); renderStats(); });
@@ -266,7 +266,7 @@ function restoreJson(file) {
   r.readAsText(file);
 }
 function exportCsv() {
-  const head = ['상태', '전략', '종목', '코드', '매수일', '매수시각', '매수가', '수량', '매도일', '매도시각', '매도가', '매도수량', '순손익', '수익률%', '수수료', '세금', '근거태그', '재료', '근거', '목표%', '손절%', '시나리오', '확신도', '근거기록시각', '근거적중', '계획이행', '실수', '복기', '배운점'];
+  const head = ['상태', '전략', '종목', '코드', '매수일', '매수시각', '매수가', '수량', '매도일', '매도시각', '매도가', '매도수량', '순손익', '수익률%', '수수료', '세금', '근거태그', '재료', '근거', '목표%', '손절%', '대응계획', '확신도', '근거기록시각', '근거적중', '계획대로', '실수', '복기', '배운점'];
   const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
   const rows = liveTrades().sort((a, b) => a.buyDate.localeCompare(b.buyDate)).map(t => {
     const c = calcTrade(t, settings) || {};

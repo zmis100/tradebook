@@ -1,7 +1,7 @@
 {
   "name": "트레이드북 — 매매일지",
   "short_name": "트레이드북",
-  "description": "종가베팅 매매일지 — 매수 근거 박제, 다음 날 복기, 블로그 카드, 월간 결산",
+  "description": "매매일지 — 매수 근거 박제, 매도 후 복기, 블로그 카드, 월간 결산",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

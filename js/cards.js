@@ -1,5 +1,6 @@
 /* 트레이드북 블로그 카드 — 720px 고정폭, 2배 해상도 PNG(1440px)로 저장 → 블로그 모바일에서도 글씨가 큼
-   종류: trade(매매 1건: 전일 근거 vs 결과) / day(일일: 어제 종베 결과 + 오늘 진입 + 시황) / month(월간 결산) */
+   종류: trade(매매 1건: 매수 근거 vs 결과) / day(일일: 청산 결과 + 신규 진입 + 무포지션 + 시황) / month(월간 결산)
+   문구 규칙: 매매 종류(종가베팅·단타·스윙)나 날짜를 가정하지 않는 고정 이름만 사용 */
 'use strict';
 
 const CARD_CSS = `
@@ -101,12 +102,12 @@ function tradeCardHTML(t, o) {
   const hero = c ? `<div class="bc-hero"><div><div class="big ${pnlClass(c.net)}">${fmtPct(c.pct)}</div>${o.masked ? '' : `<div class="amt ${pnlClass(c.net)}">${cAmt(c.net)}</div>`}</div>
     <div class="bc-flow num">${fmtNum(t.buyPrice)}<span class="arrow">→</span>${fmtNum(t.sellPrice)}</div></div>` :
     `<div class="bc-hero"><div><div class="big" style="font-size:40px">매수 ${fmtNum(t.buyPrice)}원</div>${o.masked ? '' : `<div class="amt">${fmtNum(t.qty)}주</div>`}</div></div>`;
-  const thesis = `<div class="bc-sec"><div class="bc-sec-t">📌 ${c ? (c.holdDays <= 3 ? '전일 매수 근거' : '매수 당시 근거') : '매수 근거'} <small>${t.thesisAt ? stampLabel(t.thesisAt) + ' 기록' : ''}</small></div>${thesisPanel(t)}</div>`;
+  const thesis = `<div class="bc-sec"><div class="bc-sec-t">📌 매수 근거 <small>${t.thesisAt ? stampLabel(t.thesisAt) + ' 기록' : ''}</small></div>${thesisPanel(t)}</div>`;
   // 첨부 이미지 전부: 매수 시점 → 근거 아래, 매도·결과 → 복기 아래 (세로로 이어 붙임)
   const img = (o.buyImgs || []).length ? `<div class="bc-sec">${cardImgs(o.buyImgs)}</div>` : '';
   const result = c ? `<div class="bc-sec"><div class="bc-sec-t">📊 결과 · 복기 <small>${mdLabel(t.sellDate)} ${esc(t.sellTime || '')}</small></div>
     <div class="bc-panel">
-      <div class="bc-badges" style="margin-top:0">${t.thesisHit ? `<span class="bc-badge">${HIT_LABEL[t.thesisHit]}</span>` : ''}${t.planKept ? `<span class="bc-badge">${t.planKept === 'O' ? '계획대로 대응 O' : '계획 이탈 X'}</span>` : ''}<span class="bc-badge">보유 ${c.holdDays}일</span></div>
+      <div class="bc-badges" style="margin-top:0">${t.thesisHit ? `<span class="bc-badge">${HIT_LABEL[t.thesisHit]}</span>` : ''}${t.planKept ? `<span class="bc-badge">${t.planKept === 'O' ? '계획대로 O' : '계획 이탈 X'}</span>` : ''}<span class="bc-badge">보유 ${c.holdDays}일</span></div>
       ${t.review ? `<p>${esc(t.review)}</p>` : ''}
       ${(t.mistakes || []).length ? `<div class="bc-chips" style="margin-top:10px">${t.mistakes.map(x => `<span class="bc-chip miss">${esc(x)}</span>`).join('')}</div>` : ''}
       ${t.lesson ? `<p><span class="bc-k">배운 점</span><b>${esc(t.lesson)}</b></p>` : ''}
@@ -123,10 +124,10 @@ function dayCardHTML(date, o) {
   const note = getDayNote(date);
   // 제목은 그날 매매의 전략을 따름 (여러 개면 함께, 무포지션만 있는 날은 기본 전략)
   const strategies = [...new Set([...closed, ...opened].map(t => t.strategy).filter(Boolean))];
-  const kicker = (strategies.length ? strategies.join(' · ') : (settings.strategies[0] || '')) + ' 매매일지';
+  const kicker = strategies.length ? strategies.join(' · ') + ' 매매일지' : '매매일지';   // 매매 없는 날(무포지션·메모만)은 전략을 가정하지 않음
   const head = `<div class="bc-kicker">${esc(kicker)}</div><div class="bc-title">${date.slice(0, 4)}.${date.slice(5, 7)}.${date.slice(8)} (${dowOf(date)})</div>`;
   const dayPct = st.buyAmtSum ? st.net / st.buyAmtSum * 100 : 0;
-  const hero = closed.length ? `<div class="bc-hero"><div><div class="bc-sub" style="margin:0 0 6px">오늘 실현 ${closed.length}건 · ${st.wins}승 ${st.losses}패</div>
+  const hero = closed.length ? `<div class="bc-hero"><div><div class="bc-sub" style="margin:0 0 6px">실현 ${closed.length}건 · ${st.wins}승 ${st.losses}패</div>
       <div class="big ${pnlClass(st.net)}">${o.masked ? fmtPct(dayPct) : fmtSigned(st.net) + '원'}</div></div>
       <div style="text-align:right"><div class="bc-sub" style="margin:0">${Number(date.slice(5, 7))}월 누적</div><div style="font-size:24px;font-weight:800" class="${pnlClass(mst.net)}">${o.masked ? '승률 ' + mst.winRate.toFixed(0) + '%' : fmtCompact(mst.net)}</div></div></div>` : '';
   const closedSec = closed.length ? `<div class="bc-sec"><div class="bc-sec-t">📊 청산 결과</div>${closed.map(t => {
@@ -138,7 +139,7 @@ function dayCardHTML(date, o) {
     const p = pics(t.id), photos = cardImgs(p.buy, '📌 매수 시점') + cardImgs(p.sell, '📊 매도·결과');
     return photos ? `<div class="bc-item">${row}${photos}</div>` : row;
   }).join('')}</div>` : '';
-  const openSec = opened.length ? `<div class="bc-sec"><div class="bc-sec-t">📌 오늘 진입 (내일 결과)</div>${opened.map(t => `
+  const openSec = opened.length ? `<div class="bc-sec"><div class="bc-sec-t">📌 신규 진입</div>${opened.map(t => `
     <div class="bc-panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:21px">${esc(t.name)}</b>
       <span style="font-size:16px;color:var(--b-muted);font-weight:700">${fmtNum(t.buyPrice)}원 ${t.buyTime ? '· ' + esc(t.buyTime) : ''}</span></div>
       ${(t.tags || []).length ? `<div class="bc-chips" style="margin-top:8px">${t.tags.map(x => `<span class="bc-chip">${esc(x)}</span>`).join('')}</div>` : ''}
@@ -146,12 +147,12 @@ function dayCardHTML(date, o) {
       ${t.reason ? `<p><span class="bc-k">근거</span>${esc(t.reason)}</p>` : ''}
       ${planTxt(t) || t.scenario ? `<p><span class="bc-k">계획</span><b>${planTxt(t)}</b>${t.scenario ? (planTxt(t) ? '<br>' : '') + esc(t.scenario) : ''}</p>` : ''}
     </div>${cardImgs(pics(t.id).buy)}`).join('')}</div>` : '';
-  const flatSec = flats.length ? `<div class="bc-sec"><div class="bc-sec-t">😴 오늘 무포지션 <small>${flats[0].thesisAt ? stampLabel(flats[0].thesisAt) + ' 기록' : ''}</small></div>${flats.map(t => `
+  const flatSec = flats.length ? `<div class="bc-sec"><div class="bc-sec-t">😴 무포지션 <small>${flats[0].thesisAt ? stampLabel(flats[0].thesisAt) + ' 기록' : ''}</small></div>${flats.map(t => `
     <div class="bc-panel" style="margin-bottom:10px">
       ${(t.tags || []).length ? `<div class="bc-chips">${t.tags.map(x => `<span class="bc-chip">${esc(x)}</span>`).join('')}</div>` : ''}
       ${t.catalyst ? `<p><span class="bc-k">시장</span>${esc(t.catalyst)}</p>` : ''}
       ${t.reason ? `<p><span class="bc-k">판단</span>${esc(t.reason)}</p>` : ''}
-      ${t.scenario ? `<p><span class="bc-k">내일</span>${esc(t.scenario)}</p>` : ''}
+      ${t.scenario ? `<p><span class="bc-k">내일 계획</span>${esc(t.scenario)}</p>` : ''}
     </div>${cardImgs(pics(t.id).buy)}`).join('')}</div>` : '';
   const noteSec = note ? `<div class="bc-sec"><div class="bc-sec-t">📝 시황 메모</div><div class="bc-panel"><p style="margin:0">${esc(note)}</p></div></div>` : '';
   const empty = !closed.length && !opened.length && !flats.length && !note ? `<div class="bc-panel" style="margin-top:20px">이 날짜 기록이 없음</div>` : '';
@@ -187,7 +188,7 @@ function monthCardHTML(ym, o) {
     const ds = ym + '-' + pad2(d), v = st.byDay[ds];
     const dayRows = v ? st.rows.filter(r => r.t.sellDate === ds) : [];
     const dp = v ? dayRows.reduce((a, r) => a + r.c.net, 0) / dayRows.reduce((a, r) => a + r.c.buyAmt, 0) * 100 : 0;
-    cells += `<div class="c ${v ? (v.net > 0 ? 'u' : v.net < 0 ? 'dn' : '') : ''}"><span class="dd">${d}${flatDays.has(ds) ? ' 😴' : ''}</span>${v ? `<span class="vv ${pnlClass(v.net)}">${o.masked ? fmtPct(dp, 1) : fmtCompact(v.net)}</span>` : flatDays.has(ds) ? '<span class="vv" style="color:var(--b-muted)">관망</span>' : ''}</div>`;
+    cells += `<div class="c ${v ? (v.net > 0 ? 'u' : v.net < 0 ? 'dn' : '') : ''}"><span class="dd">${d}${flatDays.has(ds) ? ' 😴' : ''}</span>${v ? `<span class="vv ${pnlClass(v.net)}">${o.masked ? fmtPct(dp, 1) : fmtCompact(v.net)}</span>` : ''}</div>`;
   }
   const cal = `<div class="bc-sec"><div class="bc-sec-t">🗓 손익 캘린더</div><div class="bc-cal">${cells}</div></div>`;
   const curve = `<div class="bc-sec"><div class="bc-sec-t">📈 누적 ${o.masked ? '수익률' : '손익'} <small>청산 순서</small></div><div class="chart-box"><canvas data-card-chart="equity"></canvas></div></div>`;

@@ -58,7 +58,7 @@ function bindStars() {
 const isFlat = t => !!t && t.status === 'flat';
 function thesisBlock(t, title) {
   const flat = isFlat(t);
-  const L = flat ? { cat: '시장', reason: '판단', scn: '내일' } : { cat: '재료', reason: '근거', scn: '시나리오' };
+  const L = flat ? { cat: '시장', reason: '판단', scn: '내일 계획' } : { cat: '재료', reason: '근거', scn: '계획' };
   return `<div class="thesis"><div class="stamp"><span>${title || (flat ? '😴 무포지션 이유' : '📌 매수 근거')}</span><span>${t.thesisAt ? stampLabel(t.thesisAt) + ' 기록' : ''}${t.thesisEditedAt ? ' · ' + stampLabel(t.thesisEditedAt) + ' 수정' : ''}</span></div>
     ${(t.tags || []).length ? `<div class="chips">${t.tags.map(x => `<span class="chip static">${esc(x)}</span>`).join('')}</div>` : ''}
     ${t.catalyst ? `<p><span class="k">${L.cat}</span>${esc(t.catalyst)}</p>` : ''}
@@ -144,10 +144,10 @@ function mountImageField(boxId, ids, tradeId) {
 
 /* ===== 매수 / 무포지션 기록 (근거 박제) ===== */
 const FORM_TEXT = {
-  buy: { title: '＋ 매수 기록', date: '매수일', cat: '재료 · 뉴스', catPh: '한 줄로', reason: '근거 메모', reasonPh: '왜 샀나? 차트·수급·분위기',
-    scn: '내일 시나리오', scnPh: '갭상이면? 갭하락이면?', save: '근거 박제하기',
+  buy: { title: '＋ 매수 기록', date: '매수일', cat: '재료', catPh: '뉴스·공시·테마 한 줄', reason: '근거', reasonPh: '왜 샀나? 차트·수급·분위기',
+    scn: '대응 계획', scnPh: '갭상·갭하락·익절·손절 때 어떻게 할지', save: '근거 박제하기',
     raw: '예) 변압기 수주 공시 나오고 거래대금 1위, 장 막판까지 신고가 유지. 내일 갭 3% 뜨면 반 팔고 마이너스면 9시5분 손절' },
-  flat: { title: '😴 무포지션 기록', date: '날짜', cat: '시장 상황', catPh: '예: 지수 장 막판 밀림, 주도 섹터 없음', reason: '판단 메모', reasonPh: '왜 쉬기로 했나? 봤던 후보·패스 이유',
+  flat: { title: '😴 무포지션 기록', date: '날짜', cat: '시장', catPh: '예: 지수 장 막판 밀림, 주도 섹터 없음', reason: '판단', reasonPh: '왜 쉬기로 했나? 봤던 후보·패스 이유',
     scn: '내일 계획', scnPh: '내일 체크할 것', save: '무포지션 박제하기',
     raw: '예) 지수 막판에 밀리고 거래대금 상위가 다 테마 끝물이라 패스. 내일 CPI 보고 다시' },
 };
@@ -178,9 +178,9 @@ function openBuyForm(editId, startMode) {
 
     <div class="field" data-buyonly><span>매수 근거 (탭해서 선택)</span>${chipGroup('f-tags', settings.reasonTags, isFlat(t) ? [] : (t.tags || []), true, true)}</div>
     <div class="field" data-flatonly><span>무포지션 이유 (탭해서 선택)</span>${chipGroup('f-ftags', settings.flatTags, isFlat(t) ? (t.tags || []) : [], true, true)}</div>
-    <label class="field"><span id="f-lab-cat">재료 · 뉴스</span><input id="f-cat" type="text" value="${esc(t.catalyst || '')}"></label>
-    <label class="field"><span id="f-lab-reason">근거 메모</span><textarea id="f-reason">${esc(t.reason || '')}</textarea></label>
-    <label class="field"><span id="f-lab-scn">내일 시나리오</span><textarea id="f-scn">${esc(t.scenario || '')}</textarea></label>
+    <label class="field"><span id="f-lab-cat">재료</span><input id="f-cat" type="text" value="${esc(t.catalyst || '')}"></label>
+    <label class="field"><span id="f-lab-reason">근거</span><textarea id="f-reason">${esc(t.reason || '')}</textarea></label>
+    <label class="field"><span id="f-lab-scn">대응 계획</span><textarea id="f-scn">${esc(t.scenario || '')}</textarea></label>
     <div class="field" data-buyonly><span>확신도</span>${starsHTML(t.confidence)}</div>
     <div class="field"><span>차트 캡처 <small id="f-img-hint"></small></span>
       <div class="thumbs" id="f-thumbs"></div></div>
@@ -271,7 +271,7 @@ function openBuyForm(editId, startMode) {
     else if (Date.now() - t.thesisAt > 6 * 3600e3) t.thesisEditedAt = Date.now();   // 사후 수정 흔적 남김
     upsertTrade(t); imgField.commit();
     closeSheet(true);
-    toast(editId ? '수정됨' : mode === 'flat' ? '무포지션 박제 완료' : '근거 박제 완료 — 내일 복기 대기에 표시됨');
+    toast(editId ? '수정됨' : mode === 'flat' ? '무포지션 박제 완료' : '근거 박제 완료 — 복기 대기에 표시됨');
     rerenderActive();
   };
 }
@@ -282,7 +282,7 @@ function openSellForm(id) {
   const editing = t.status === 'closed';
   let imgField = null;
   openSheet((editing ? '결과 수정 — ' : '결과 기록 — ') + t.name, `
-    ${thesisBlock(t, '📌 ' + mdLabel(t.buyDate) + '의 내가 적은 근거')}
+    ${thesisBlock(t, '📌 매수 근거 · ' + mdLabel(t.buyDate))}
     <div class="pos-meta" style="margin:-2px 0 12px">매수 ${fmtNum(t.buyPrice)}원 × ${fmtNum(t.qty)}주 · ${mdLabel(t.buyDate)} ${esc(t.buyTime || '')}</div>
     <div class="grid2"><label class="field"><span>매도가</span>${numInput('s-sp', t.sellPrice, '원')}</label>
       <label class="field"><span>매도 수량</span>${numInput('s-qty', t.sellQty || t.qty, '주')}</label></div>
@@ -292,9 +292,9 @@ function openSellForm(id) {
       <label class="field" style="margin-top:8px">${numInput('s-man', t.netManual, '예: 12,345 / -8,000 (비우면 자동 계산)')}</label></details>
     <div class="row wrap" style="gap:16px;margin-bottom:12px">
       <div><span class="label">근거 적중?</span>${segHTML('s-hit', ['O', '△', 'X'], t.thesisHit)}</div>
-      <div><span class="label">계획대로 대응?</span>${segHTML('s-plan', ['O', 'X'], t.planKept)}</div></div>
+      <div><span class="label">계획대로 했나?</span>${segHTML('s-plan', ['O', 'X'], t.planKept)}</div></div>
     <div class="field"><span>실수 (있으면)</span>${chipGroup('s-mis', settings.mistakeTags, t.mistakes || [], true, true)}</div>
-    <label class="field"><span>복기</span><textarea id="s-rev" placeholder="시초가 흐름, 대응, 결과">${esc(t.review || '')}</textarea></label>
+    <label class="field"><span>복기</span><textarea id="s-rev" placeholder="매수 후 흐름, 대응, 결과">${esc(t.review || '')}</textarea></label>
     <label class="field"><span>배운 점 한 줄</span><input id="s-les" type="text" value="${esc(t.lesson || '')}" placeholder="다음에 똑같이 할 것 / 하지 말 것"></label>
     <div class="field"><span>매도·결과 캡처 <small>(캡처 후 <b>Ctrl+V</b> 또는 이미지 선택 — 블로그 카드 결과 아래에 들어감)</small></span>
       <div class="thumbs" id="s-thumbs"></div></div>
