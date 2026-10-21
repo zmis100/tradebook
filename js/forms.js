@@ -6,8 +6,27 @@ const val = id => { const el = document.getElementById(id); return el ? el.value
 /* 재료 확인: 네이버 뉴스 최신순 (Gemini 구글검색 연동은 무료 키에서 막혀 있음) */
 const openNews = name => window.open('https://search.naver.com/search.naver?where=news&sort=1&query=' + encodeURIComponent(name), '_blank', 'noopener');
 const nval = id => parseNum(val(id));
+/* 숫자 칸: 입력하는 동안 천 단위 쉼표를 바로 찍고, 커서는 같은 숫자 뒤에 유지 */
+function formatTyping(el) {
+  const raw = el.value, caret = el.selectionStart ?? raw.length;
+  const keep = ch => /[\d.\-]/.test(ch);
+  const before = [...raw.slice(0, caret)].filter(keep).length;
+  let [int, ...dec] = raw.replace(/[^\d.\-]/g, '').split('.');
+  const neg = int.startsWith('-');
+  int = int.replace(/-/g, '').replace(/^0+(?=\d)/, '');
+  const out = (neg ? '-' : '') + int.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (dec.length ? '.' + dec.join('') : '');
+  if (out === raw) return;
+  el.value = out;
+  let pos = 0;
+  for (let n = 0; pos < out.length && n < before; pos++) if (keep(out[pos])) n++;
+  el.setSelectionRange(pos, pos);
+}
 function bindCommaFormat(ids) {
-  ids.forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('blur', () => { const n = parseNum(el.value); if (isFinite(n)) el.value = fmtNum(n, Math.abs(n % 1) > 0 ? 2 : 0); }); });
+  ids.forEach(id => {
+    const el = document.getElementById(id); if (!el) return;
+    el.addEventListener('input', () => formatTyping(el));
+    el.addEventListener('blur', () => { const n = parseNum(el.value); if (isFinite(n)) el.value = fmtNum(n, Math.abs(n % 1) > 0 ? 2 : 0); });
+  });
 }
 function chipGroup(id, options, selected, multi, addable) {
   return `<div class="chips" id="${id}" data-multi="${multi ? 1 : 0}">${options.map(o => `<button type="button" class="chip${(multi ? selected.includes(o) : selected === o) ? ' on' : ''}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}${addable ? '<button type="button" class="chip add" data-add>＋ 직접 추가</button>' : ''}</div>`;

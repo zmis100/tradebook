@@ -121,7 +121,10 @@ function dayCardHTML(date, o) {
   const pics = id => (o.imgMap || {})[id] || {};   // cardHTML에서 미리 읽어 둔 첨부 사진
   const st = computeStats(closed, settings), mst = computeStats(closedIn(live, ymOf(date)), settings);
   const note = getDayNote(date);
-  const head = `<div class="bc-kicker">종가베팅 매매일지</div><div class="bc-title">${date.slice(0, 4)}.${date.slice(5, 7)}.${date.slice(8)} (${dowOf(date)})</div>`;
+  // 제목은 그날 매매의 전략을 따름 (여러 개면 함께, 무포지션만 있는 날은 기본 전략)
+  const strategies = [...new Set([...closed, ...opened].map(t => t.strategy).filter(Boolean))];
+  const kicker = (strategies.length ? strategies.join(' · ') : (settings.strategies[0] || '')) + ' 매매일지';
+  const head = `<div class="bc-kicker">${esc(kicker)}</div><div class="bc-title">${date.slice(0, 4)}.${date.slice(5, 7)}.${date.slice(8)} (${dowOf(date)})</div>`;
   const dayPct = st.buyAmtSum ? st.net / st.buyAmtSum * 100 : 0;
   const hero = closed.length ? `<div class="bc-hero"><div><div class="bc-sub" style="margin:0 0 6px">오늘 실현 ${closed.length}건 · ${st.wins}승 ${st.losses}패</div>
       <div class="big ${pnlClass(st.net)}">${o.masked ? fmtPct(dayPct) : fmtSigned(st.net) + '원'}</div></div>
