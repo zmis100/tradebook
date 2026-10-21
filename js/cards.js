@@ -129,9 +129,7 @@ function dayCardHTML(date, o) {
   const hero = closed.length ? `<div class="bc-hero"><div><div class="bc-sub" style="margin:0 0 6px">오늘 실현 ${closed.length}건 · ${st.wins}승 ${st.losses}패</div>
       <div class="big ${pnlClass(st.net)}">${o.masked ? fmtPct(dayPct) : fmtSigned(st.net) + '원'}</div></div>
       <div style="text-align:right"><div class="bc-sub" style="margin:0">${Number(date.slice(5, 7))}월 누적</div><div style="font-size:24px;font-weight:800" class="${pnlClass(mst.net)}">${o.masked ? '승률 ' + mst.winRate.toFixed(0) + '%' : fmtCompact(mst.net)}</div></div></div>` : '';
-  // 청산 섹션 제목: 전부 종가베팅이면 '전일 종베 결과', 단타·스윙이 섞이면 '오늘 청산 결과'
-  const allClosingBet = closed.every(t => /종가|종베/.test(t.strategy || ''));
-  const closedSec = closed.length ? `<div class="bc-sec"><div class="bc-sec-t">📊 ${allClosingBet ? '전일 종베 결과' : '오늘 청산 결과'}</div>${closed.map(t => {
+  const closedSec = closed.length ? `<div class="bc-sec"><div class="bc-sec-t">📊 청산 결과</div>${closed.map(t => {
     const c = calcTrade(t, settings);
     const row = `<div class="bc-row"><div style="min-width:0"><div class="n">${esc(t.name)}</div>
       <div class="d">${esc([(t.tags || []).slice(0, 3).join(' · '), t.catalyst].filter(Boolean).join(' / '))}</div>

@@ -31,7 +31,6 @@ function renderHome() {
   const st = computeStats(closedIn(live, ymOf(today)), settings);
   const open = live.filter(t => t.status === 'open').sort((a, b) => a.buyDate.localeCompare(b.buyDate));
   const closedToday = sortClosed(live.filter(t => t.status === 'closed' && t.sellDate === today));
-  const boughtToday = live.filter(t => t.buyDate === today && t.status === 'closed');
   const flatToday = live.filter(t => t.buyDate === today && t.status === 'flat');
   const note = getDayNote(today);
   el.innerHTML = `
@@ -50,10 +49,9 @@ function renderHome() {
       <button class="btn primary block" data-sell="${t.id}">결과 기록하기</button></div>`).join('')
       : '<div class="card empty">보유 중인 종목 없음 — 종베 들어가면 ＋기록 (쉬는 날은 무포지션으로 이유만)</div>'}
 
-    <div class="sec-title">📝 오늘 <span class="count">${closedToday.length + boughtToday.length + open.filter(t => t.buyDate === today).length + flatToday.length}건</span></div>
+    <div class="sec-title">📝 오늘 <span class="count">${closedToday.length + open.filter(t => t.buyDate === today).length + flatToday.length}건</span></div>
     <div class="card">
       ${closedToday.length ? `<div class="label">오늘 청산</div>${closedToday.map(tradeRowHTML).join('')}` : ''}
-      ${boughtToday.length ? `<div class="label">오늘 매수 · 당일 청산</div>${boughtToday.map(tradeRowHTML).join('')}` : ''}
       ${flatToday.length ? `<div class="label">오늘 무포지션</div>${flatToday.map(tradeRowHTML).join('')}` : ''}
       <div class="label" style="margin-top:6px">시황 메모</div>
       ${note ? `<div class="thesis" style="margin-top:0"><p style="margin:0">${esc(note)}</p></div>` : '<p class="muted" style="margin:0 0 10px;font-size:14px">오늘 시장 분위기·내일 체크할 것</p>'}
