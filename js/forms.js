@@ -52,9 +52,9 @@ function setChips(id, vals) { document.querySelectorAll('#' + id + ' .chip').for
 function segHTML(id, opts, cur) { return `<div class="seg" id="${id}">${opts.map(o => `<button type="button" data-v="${o}" class="${cur === o ? 'on' : ''}">${o}</button>`).join('')}</div>`; }
 function bindSeg(id) { const box = document.getElementById(id); box.onclick = e => { const b = e.target.closest('button'); if (!b) return; const on = !b.classList.contains('on'); box.querySelectorAll('button').forEach(x => x.classList.remove('on')); if (on) b.classList.add('on'); }; }
 const segVal = id => { const b = document.querySelector('#' + id + ' button.on'); return b ? b.dataset.v : ''; };
-function starsHTML(cur) { return `<div class="stars" id="f-conf">${[1, 2, 3, 4, 5].map(i => `<button type="button" data-v="${i}" class="${i <= (cur || 0) ? 'on' : ''}" aria-label="확신도 ${i}">★</button>`).join('')}</div>`; }
-function bindStars() {
-  const box = document.getElementById('f-conf');
+function starsHTML(cur, id = 'f-conf') { return `<div class="stars" id="${id}">${[1, 2, 3, 4, 5].map(i => `<button type="button" data-v="${i}" class="${i <= (cur || 0) ? 'on' : ''}" aria-label="확신도 ${i}">★</button>`).join('')}</div>`; }
+function bindStars(id = 'f-conf') {
+  const box = document.getElementById(id);
   box.onclick = e => { const b = e.target.closest('button'); if (!b) return; const v = Number(b.dataset.v); const cur = Number(box.dataset.v || 0); const nv = cur === v ? 0 : v; box.dataset.v = nv; box.querySelectorAll('button').forEach(x => x.classList.toggle('on', Number(x.dataset.v) <= nv)); };
 }
 const isFlat = t => !!t && t.status === 'flat';
@@ -159,7 +159,10 @@ function mountImageField(boxId, ids, tradeId, notes = {}, isTarget = null) {
   return field;
 }
 
-/* ===== 매수 / 무포지션 기록 (근거 박제) ===== */
+/* ===== 매수 / 무포지션 기록 (근거 박제) =====
+   새 매수는 종목 칸 1. 2. 3. …(＋ 종목 추가) — 칸마다 매매 1건, 전략·날짜는 위에서 한 번
+   단타를 고르면 칸이 짧아짐: 매수가·매도가·수량 + 당일 매수·매도 이유 + 캡처 (새 기록에서 매도가까지 넣으면 그날 청산)
+   칸 id: 1번 칸은 예전 그대로(f-name …), 2번부터 뒤에 번호(f-name-1 …) */
 const FORM_TEXT = {
   buy: { title: '＋ 매수 기록', date: '매수일', cat: '재료', catPh: '뉴스·공시·테마 한 줄', reason: '근거', reasonPh: '왜 샀나? 차트·수급·분위기',
     scn: '대응 계획', scnPh: '갭상·갭하락·익절·손절 때 어떻게 할지', save: '근거 박제하기',
@@ -167,241 +170,214 @@ const FORM_TEXT = {
   flat: { title: '😴 무포지션 기록', date: '날짜', cat: '시장', catPh: '예: 지수 장 막판 밀림, 주도 섹터 없음', reason: '판단', reasonPh: '왜 쉬기로 했나? 봤던 후보·패스 이유',
     scn: '내일 계획', scnPh: '내일 체크할 것', save: '무포지션 박제하기',
     raw: '예) 지수 막판에 밀리고 거래대금 상위가 다 테마 끝물이라 패스. 내일 CPI 보고 다시' },
+  quick: { reason: '당일 매수·매도 이유', reasonPh: '왜 사고 왜 팔았나? 차트·수급·대응' },   // 단타 칸
 };
-function openBuyForm(editId, startMode) {
-  const t = editId ? JSON.parse(JSON.stringify(getTrade(editId))) : { id: uid(), status: 'open', strategy: settings.strategies[0], buyDate: todayStr(), tags: [], imgIds: [] };
-  let mode = isFlat(t) || startMode === 'flat' ? 'flat' : 'buy';
-  const canSwitch = t.status !== 'closed';      // 결과까지 기록된 매매는 무포지션으로 바꾸지 않음
-  let imgField = null;
-  openSheet(FORM_TEXT[mode].title, `
-    <div class="seg modes" id="f-mode" style="display:${canSwitch ? 'grid' : 'none'};grid-template-columns:repeat(${editId ? 2 : 3},1fr);margin-bottom:14px">
-      <button type="button" data-v="buy">📈 매수</button>${editId ? '' : '<button type="button" data-v="multi">⚡ 여러 종목</button>'}<button type="button" data-v="flat">😴 무포지션</button></div>
-    <div id="f-buyonly">
-      ${chipGroup('f-strategy', settings.strategies, t.strategy, false)}
-      <div class="field suggest" style="margin-top:12px"><span>종목</span>
-        <input id="f-name" type="text" autocomplete="off" placeholder="종목명 또는 코드" value="${esc(t.name || '')}">
-        <div class="suggest-list" id="f-suggest" hidden></div>
-        <div class="hint" id="f-code-hint">${t.code ? esc(t.code) + ' · ' + (MARKET_LABEL[t.market] || '') : 'KRX 목록에서 자동완성 → 코드 자동 입력'}</div></div>
-      <div class="grid2"><label class="field"><span>매수가</span>${numInput('f-bp', t.buyPrice, '원')}</label>
-        <label class="field"><span>수량</span>${numInput('f-qty', t.qty, '주')}</label></div>
-      <div class="calc-line" id="f-amt">매수금액 -</div>
+const fid = (k, n) => k ? `f-${n}-${k}` : `f-${n}`;
+/* 종목 칸 하나 — data-buyonly(매수만) · data-flatonly(무포지션만) · data-full(단타면 숨김) · data-sellonly(단타 새 기록만) */
+function buyEntryHTML(k, t) {
+  const id = n => fid(k, n), flat = isFlat(t);
+  return `<div class="bentry" data-k="${k}"${k ? ' data-buyonly' : ''}>
+    <div class="bentry-no">${k + 1}.</div>
+    <div data-buyonly>
+      <div class="field suggest"><span>종목</span>
+        <input id="${id('name')}" type="text" autocomplete="off" placeholder="종목명 또는 코드" value="${esc(t.name || '')}">
+        <div class="suggest-list" id="${id('suggest')}" hidden></div>
+        <div class="hint" id="${id('code-hint')}">${t.code ? esc(t.code) + ' · ' + (MARKET_LABEL[t.market] || '') : 'KRX 목록에서 자동완성 → 코드 자동 입력'}</div></div>
+      <div class="pricegrid"><label class="field"><span>매수가</span>${numInput(id('bp'), t.buyPrice, '원')}</label>
+        <label class="field" data-sellonly><span>매도가</span>${numInput(id('sell'), '', '원')}</label>
+        <label class="field"><span>수량</span>${numInput(id('qty'), t.qty, '주')}</label></div>
+      <div class="calc-line" id="${id('amt')}">매수금액 -</div>
     </div>
-    <label class="field"><span id="f-lab-date">매수일</span><input id="f-bd" type="date" value="${t.buyDate}"></label>
-
-    <div class="ai-box"><span class="label">✨ 대충 쓰고 AI로 정리 <small>(폰 키보드 마이크로 말해도 됨)</small></span>
-      <textarea id="f-raw"></textarea>
-      <div class="btn-row" style="margin-top:8px"><button type="button" class="btn small accent" id="f-ai">AI로 항목 채우기</button><button type="button" class="btn small" id="f-news" data-buyonly>뉴스 검색 ↗</button></div>
-      <div class="hint" id="f-ai-msg"></div></div>
-
-    <div class="field" data-buyonly><span>매수 근거 (탭해서 선택)</span>${chipGroup('f-tags', settings.reasonTags, isFlat(t) ? [] : (t.tags || []), true, true)}</div>
-    <div class="field" data-flatonly><span>무포지션 이유 (탭해서 선택)</span>${chipGroup('f-ftags', settings.flatTags, isFlat(t) ? (t.tags || []) : [], true, true)}</div>
-    <label class="field"><span id="f-lab-cat">재료</span><input id="f-cat" type="text" value="${esc(t.catalyst || '')}"></label>
-    <label class="field"><span id="f-lab-reason">근거</span><textarea id="f-reason">${esc(t.reason || '')}</textarea></label>
-    <label class="field"><span id="f-lab-scn">대응 계획</span><textarea id="f-scn">${esc(t.scenario || '')}</textarea></label>
-    <div class="field" data-buyonly><span>확신도</span>${starsHTML(t.confidence)}</div>
-    <div class="field"><span>차트 캡처 <small id="f-img-hint"></small></span>
-      <div class="thumbs" id="f-thumbs"></div></div>
-    <div class="sheet-foot btn-row"><button type="button" class="btn primary block" id="f-save">저장</button></div>
-  `, () => imgField && imgField.cancel());
-
-  // 매수 ↔ 무포지션 전환: 종목·가격·수량·확신도는 매수일 때만, 라벨은 모드에 맞게
-  const applyMode = () => {
-    const T = FORM_TEXT[mode];
-    document.querySelectorAll('#f-mode button').forEach(b => b.classList.toggle('on', b.dataset.v === mode));
-    document.getElementById('sheet-title').textContent = editId ? T.title.replace(/^\S+ /, '') + ' 수정' : T.title;
-    document.getElementById('f-buyonly').hidden = mode !== 'buy';
-    document.querySelectorAll('#sheet-body [data-buyonly]').forEach(el => { el.hidden = mode !== 'buy'; });
-    document.querySelectorAll('#sheet-body [data-flatonly]').forEach(el => { el.hidden = mode !== 'flat'; });
-    [['f-lab-date', 'date'], ['f-lab-cat', 'cat'], ['f-lab-reason', 'reason'], ['f-lab-scn', 'scn']].forEach(([id, k]) => { document.getElementById(id).textContent = T[k]; });
-    document.getElementById('f-cat').placeholder = T.catPh; document.getElementById('f-reason').placeholder = T.reasonPh;
-    document.getElementById('f-scn').placeholder = T.scnPh; document.getElementById('f-raw').placeholder = T.raw;
-    document.getElementById('f-save').textContent = editId ? '수정 저장' : T.save;
-    document.getElementById('f-img-hint').innerHTML = '(캡처 후 <b>Ctrl+V</b> 또는 이미지 선택 — ' + (mode === 'flat' ? '블로그 일일 카드에 들어감' : '블로그 카드에 들어감') + ')';
-  };
-  document.getElementById('f-mode').onclick = e => {
-    const b = e.target.closest('button'); if (!b) return;
-    if (b.dataset.v === 'multi') { openMultiForm(val('f-bd')); return; }   // 단타 여러 종목은 따로 폼 (날짜는 이어받음)
-    mode = b.dataset.v; applyMode();
-  };
-  applyMode();
-
-  document.getElementById('f-conf').dataset.v = t.confidence || 0;
-  bindChips('f-strategy'); bindChips('f-tags', 'reasonTags'); bindChips('f-ftags', 'flatTags'); bindStars(); bindCommaFormat(['f-bp', 'f-qty']);
-  let code = t.code || '', market = t.market || '';
-  // 종목 자동완성
-  const nameEl = document.getElementById('f-name'), sug = document.getElementById('f-suggest');
-  nameEl.addEventListener('input', () => {
-    code = ''; market = ''; document.getElementById('f-code-hint').textContent = '목록에 없으면 그냥 입력해도 됨';
-    const list = searchStocks(nameEl.value, liveTrades());
-    sug.hidden = !list.length;
-    sug.innerHTML = stockSuggestHTML(list);
-  });
-  sug.addEventListener('click', e => {
-    const b = e.target.closest('button'); if (!b) return;
-    nameEl.value = b.dataset.n; code = b.dataset.c; market = b.dataset.m; sug.hidden = true;
-    document.getElementById('f-code-hint').textContent = code + ' · ' + (MARKET_LABEL[market] || '');
-    document.getElementById('f-bp').focus();
-  });
-  nameEl.addEventListener('blur', () => setTimeout(() => { sug.hidden = true; }, 200));
-  const upd = () => { const a = nval('f-bp') * nval('f-qty'); document.getElementById('f-amt').innerHTML = '매수금액 <b class="num">' + (isFinite(a) ? fmtNum(a) + '원' : '-') + '</b>'; };
-  ['f-bp', 'f-qty'].forEach(id => document.getElementById(id).addEventListener('input', upd)); upd();
-  // 차트 이미지 (장수 제한 없음)
-  const imgIds = [...(t.imgIds || [])];
-  const notes = { ...(t.imgNotes || {}) };
-  imgField = mountImageField('f-thumbs', imgIds, t.id, notes);
-  // AI 정리 (매수 근거 / 무포지션 이유)
-  document.getElementById('f-ai').onclick = async () => {
-    const raw = val('f-raw'), msg = document.getElementById('f-ai-msg');
-    if (!raw && !imgIds.length) { msg.textContent = '메모를 쓰거나 차트 이미지를 붙여주세요'; return; }
-    msg.innerHTML = '<span class="spinner"></span> 정리 중…';
-    try {
-      const srcs = (await Promise.all(imgIds.slice(0, 1).map(getImage))).filter(Boolean);
-      const r = await aiStructureThesis(raw || '(메모 없음 — 차트만 보고 정리)', { name: nameEl.value, mode }, srcs);
-      const tagBox = mode === 'flat' ? 'f-ftags' : 'f-tags';
-      setChips(tagBox, [...new Set([...chipVals(tagBox), ...r.tags])]);
-      const fill = (id, v) => { const el = document.getElementById(id); if (v && !el.value.trim()) el.value = v; else if (v && el.value.trim() !== v) el.value = el.value.trim() + '\n' + v; };
-      fill('f-cat', r.catalyst); fill('f-reason', r.reason); fill('f-scn', r.scenario);
-      if (mode === 'buy' && r.confidence) { const box = document.getElementById('f-conf'); box.dataset.v = r.confidence; box.querySelectorAll('button').forEach(x => x.classList.toggle('on', Number(x.dataset.v) <= r.confidence)); }
-      msg.textContent = '채움 완료 (' + r.model + ') — 확인하고 고쳐서 저장';
-    } catch (e) { msg.textContent = '실패: ' + e.message + ' (메모는 그대로 있음)'; }
-  };
-  document.getElementById('f-news').onclick = () => {
-    const name = nameEl.value.trim(); if (!name) { toast('종목명부터 입력'); return; }
-    openNews(name);
-  };
-  function collect() {
-    const common = { buyDate: val('f-bd'), catalyst: val('f-cat'), reason: val('f-reason'), scenario: val('f-scn') };
-    if (mode === 'flat') return { ...common, status: 'flat', tags: chipVals('f-ftags'),   // 종목·가격·예전 목표/손절/시각은 지움
-      strategy: undefined, name: undefined, code: undefined, market: undefined, buyPrice: undefined, qty: undefined, confidence: undefined,
-      targetPct: undefined, stopPct: undefined, buyTime: undefined };
-    return { ...common, ...(isFlat(t) ? { status: 'open' } : {}), strategy: chipVals('f-strategy')[0] || settings.strategies[0],
-      name: nameEl.value.trim(), code, market, buyPrice: nval('f-bp'), qty: nval('f-qty'), tags: chipVals('f-tags'),
-      confidence: Number(document.getElementById('f-conf').dataset.v) || null };
-  }
-  document.getElementById('f-save').onclick = () => {
-    if (imgField.busy()) { toast('이미지 추가 중 — 끝나면 저장해주세요'); return; }
-    const d = collect();
-    if (!d.buyDate) { toast('날짜를 입력하세요'); return; }   // 날짜 없으면 어느 화면에서도 못 찾음
-    if (mode === 'flat') {
-      if (!d.tags.length && !d.reason && !d.catalyst) { toast('무포지션 이유를 하나 이상 남겨주세요'); return; }
-    } else {
-      if (!d.name) { toast('종목명을 입력하세요'); return; }
-      if (!(d.buyPrice > 0) || !(d.qty > 0)) { toast('매수가·수량을 입력하세요'); return; }
-    }
-    Object.assign(t, d, { imgIds, imgNotes: pruneNotes(notes, [...imgIds, ...(t.sellImgIds || [])]) });
-    if (!t.thesisAt) t.thesisAt = Date.now();
-    else if (Date.now() - t.thesisAt > 6 * 3600e3) t.thesisEditedAt = Date.now();   // 사후 수정 흔적 남김
-    upsertTrade(t); imgField.commit();
-    closeSheet(true);
-    toast(editId ? '수정됨' : mode === 'flat' ? '무포지션 박제 완료' : '근거 박제 완료 — 복기 대기에 표시됨');
-    rerenderActive();
-  };
+    <div class="ai-box" data-full><span class="label">✨ 대충 쓰고 AI로 정리 <small>(폰 키보드 마이크로 말해도 됨)</small></span>
+      <textarea id="${id('raw')}"></textarea>
+      <div class="btn-row" style="margin-top:8px"><button type="button" class="btn small accent" id="${id('ai')}">AI로 항목 채우기</button><button type="button" class="btn small" id="${id('news')}" data-buyonly>뉴스 검색 ↗</button></div>
+      <div class="hint" id="${id('ai-msg')}"></div></div>
+    <div class="field" data-buyonly data-full><span>매수 근거 (탭해서 선택)</span>${chipGroup(id('tags'), settings.reasonTags, flat ? [] : (t.tags || []), true, true)}</div>
+    ${k ? '' : `<div class="field" data-flatonly><span>무포지션 이유 (탭해서 선택)</span>${chipGroup('f-ftags', settings.flatTags, flat ? (t.tags || []) : [], true, true)}</div>`}
+    <label class="field" data-full><span id="${id('lab-cat')}">재료</span><input id="${id('cat')}" type="text" value="${esc(t.catalyst || '')}"></label>
+    <label class="field"><span id="${id('lab-reason')}">근거</span><textarea id="${id('reason')}">${esc(t.reason || '')}</textarea></label>
+    <label class="field" data-full><span id="${id('lab-scn')}">대응 계획</span><textarea id="${id('scn')}">${esc(t.scenario || '')}</textarea></label>
+    <div class="field" data-buyonly data-full><span>확신도</span>${starsHTML(t.confidence, id('conf'))}</div>
+    <div class="field"><span>차트 캡처 <small id="${id('img-hint')}"></small></span>
+      <div class="thumbs" id="${id('thumbs')}"></div></div>
+  </div>`;
 }
-
-/* ===== ⚡ 단타 여러 종목 — 칸(1. 2. 3. …)마다 종목·매수가·매도가·수량·일지·캡처, 저장하면 칸마다 매매 1건
-   매도가까지 넣으면 그날 청산(일지 → 복기, 캡처 → 매도·결과), 비우면 보유 중(일지 → 근거, 캡처 → 매수 시점) ===== */
-function openMultiForm(date) {
-  if (activeImageField) activeImageField.cancel();          // 이전 폼에서 새로 붙인 사진 정리
-  const slots = [];                                          // { k, id(매매 id), imgIds, field, code, market, c(손익) }
-  let cur = 0;                                               // Ctrl+V 받을 칸 = 마지막으로 만진 칸
+function openBuyForm(editId, startMode) {
+  const fresh = () => ({ id: uid(), status: 'open', strategy: settings.strategies[0], buyDate: todayStr(), tags: [], imgIds: [] });
+  const t0 = editId ? JSON.parse(JSON.stringify(getTrade(editId))) : fresh();
+  let mode = isFlat(t0) || startMode === 'flat' ? 'flat' : 'buy';
+  const canSwitch = t0.status !== 'closed';      // 결과까지 기록된 매매는 무포지션으로 바꾸지 않음
+  if (activeImageField) activeImageField.cancel();   // 저장 없이 바뀐 이전 폼 정리
+  const entries = [];                                // 종목 칸: { k, t, imgIds, notes, field, code, market }
+  let cur = 0;                                       // Ctrl+V 받을 칸 = 커서가 있는 칸, 없으면 마지막으로 누른 칸
   const group = {
-    busy: () => slots.some(s => s.field.busy()),
-    cancel() { slots.forEach(s => s.field.cancel()); if (activeImageField === group) activeImageField = null; },
-    commit() { slots.forEach(s => s.field.commit()); if (activeImageField === group) activeImageField = null; },
+    busy: () => entries.some(e => e.field.busy()),
+    cancel() { entries.forEach(e => e.field.cancel()); if (activeImageField === group) activeImageField = null; },
   };
   activeImageField = group;
-  openSheet('⚡ 단타 여러 종목', `
-    <div class="seg modes" id="m-mode" style="display:grid;grid-template-columns:repeat(3,1fr);margin-bottom:14px">
-      <button type="button" data-v="buy">📈 매수</button><button type="button" data-v="multi" class="on">⚡ 여러 종목</button><button type="button" data-v="flat">😴 무포지션</button></div>
-    <label class="field"><span>날짜</span><input id="m-date" type="date" value="${date || todayStr()}"></label>
-    <div class="hint" style="margin:-6px 0 12px">칸마다 한 종목 · 매도가 비우면 보유 중으로 저장 · 캡처 후 <b>Ctrl+V</b>는 지금 고른 칸으로</div>
-    <div id="m-slots"></div>
-    <button type="button" class="btn block" id="m-add" style="margin-bottom:12px">＋ 종목 추가</button>
-    <div class="calc-line" id="m-sum"></div>
-    <div class="sheet-foot btn-row"><button type="button" class="btn primary block" id="m-save">한 번에 저장</button></div>
+  openSheet(FORM_TEXT[mode].title, `
+    <div class="seg" id="f-mode" style="display:${canSwitch ? 'grid' : 'none'};grid-template-columns:1fr 1fr;margin-bottom:14px">
+      <button type="button" data-v="buy">📈 매수</button><button type="button" data-v="flat">😴 무포지션</button></div>
+    <div data-buyonly style="margin-bottom:12px">${chipGroup('f-strategy', settings.strategies, t0.strategy, false)}</div>
+    <label class="field"><span id="f-lab-date">매수일</span><input id="f-bd" type="date" value="${t0.buyDate}"></label>
+    <div id="f-entries">${buyEntryHTML(0, t0)}</div>
+    ${editId ? '' : `<button type="button" class="btn block" id="f-add" data-buyonly style="margin-bottom:6px">＋ 2번 종목 추가</button>
+      <div class="hint" data-buyonly style="margin:0 0 12px">종목마다 칸 하나 · 캡처 Ctrl+V는 커서가 있는 칸으로</div>`}
+    <div class="sheet-foot btn-row"><button type="button" class="btn primary block" id="f-save">저장</button></div>
   `, () => group.cancel());
-  document.getElementById('m-mode').onclick = e => {
-    const b = e.target.closest('button'); if (!b || b.dataset.v === 'multi') return;
-    openBuyForm(undefined, b.dataset.v);                     // 새 첨부 칸이 열리면서 여기서 붙인 사진은 정리됨
-  };
-  const box = document.getElementById('m-slots');
-  const sum = () => {
-    const n = slots.filter(s => val('m-name-' + s.k)).length, cs = slots.map(s => s.c).filter(Boolean), net = cs.reduce((a, c) => a + c.net, 0);
-    document.getElementById('m-sum').innerHTML = n ? `${n}종목${cs.length ? ` · 청산 ${cs.length}건 순손익 <b class="${pnlClass(net)} num amt">${fmtSigned(net)}원</b>` : ''}` : '빈 칸은 저장 안 됨';
-  };
-  const addSlot = () => {
-    const k = slots.length, s = { k, id: uid(), imgIds: [], code: '', market: '', c: null };
-    box.insertAdjacentHTML('beforeend', `<div class="mslot" data-k="${k}">
-      <div class="mslot-h"><b>${k + 1}.</b><div class="suggest"><input id="m-name-${k}" type="text" autocomplete="off" placeholder="종목명 또는 코드">
-        <div class="suggest-list" id="m-sug-${k}" hidden></div></div></div>
-      <div class="grid3"><label class="field"><span>매수가</span>${numInput('m-bp-' + k, '', '원')}</label>
-        <label class="field"><span>매도가</span>${numInput('m-sp-' + k, '', '원')}</label>
-        <label class="field"><span>수량</span>${numInput('m-qty-' + k, '', '주')}</label></div>
-      <div class="calc-line" id="m-calc-${k}" hidden></div>
-      <textarea id="m-memo-${k}" placeholder="일지 · 매수·매도 이유"></textarea>
-      <div class="thumbs" id="m-thumbs-${k}"></div></div>`);
-    // 종목 자동완성
-    const nameEl = document.getElementById('m-name-' + k), sug = document.getElementById('m-sug-' + k);
-    nameEl.addEventListener('input', () => {
-      s.code = ''; s.market = '';
-      const list = searchStocks(nameEl.value, liveTrades());
-      sug.hidden = !list.length; sug.innerHTML = stockSuggestHTML(list); sum();
-    });
-    sug.addEventListener('click', e => {
-      const b = e.target.closest('button'); if (!b) return;
-      nameEl.value = b.dataset.n; s.code = b.dataset.c; s.market = b.dataset.m; sug.hidden = true;
-      document.getElementById('m-bp-' + k).focus(); sum();
-    });
-    nameEl.addEventListener('blur', () => setTimeout(() => { sug.hidden = true; }, 200));
-    // 매도가까지 있으면 수수료·세금 뺀 손익 바로 계산
-    const calc = () => {
-      const bp = nval('m-bp-' + k), sp = nval('m-sp-' + k), q = nval('m-qty-' + k), line = document.getElementById('m-calc-' + k);
-      s.c = bp > 0 && q > 0 && sp > 0 ? calcTrade({ status: 'closed', buyPrice: bp, sellPrice: sp, qty: q, sellQty: q }, settings) : null;
-      line.innerHTML = s.c ? `순손익 <b class="${pnlClass(s.c.net)} num amt">${fmtSigned(s.c.net)}원</b> · <b class="${pnlClass(s.c.net)}">${fmtPct(s.c.pct)}</b>`
-        : bp > 0 && q > 0 ? '매도가 비우면 보유 중으로 저장 → 나중에 결과 기록' : '';
-      line.hidden = !line.innerHTML; sum();
-    };
-    bindCommaFormat(['m-bp-' + k, 'm-sp-' + k, 'm-qty-' + k]);
-    ['m-bp-', 'm-sp-', 'm-qty-'].forEach(p => document.getElementById(p + k).addEventListener('input', calc));
-    s.field = mountImageField('m-thumbs-' + k, s.imgIds, s.id, null, () => targetK() === k);
-    slots.push(s);
-  };
-  // Ctrl+V 대상: 커서가 있는 칸, 없으면 마지막으로 누른 칸 (테두리로 표시)
-  const pick = el => { cur = Number(el.dataset.k); box.querySelectorAll('.mslot').forEach(x => x.classList.toggle('cur', x === el)); };
+
+  const box = document.getElementById('f-entries');
+  const isQuick = () => mode === 'buy' && chipVals('f-strategy')[0] === '단타';
+  const pick = el => { cur = Number(el.dataset.k); box.querySelectorAll('.bentry').forEach(x => x.classList.toggle('cur', x === el)); };
   const targetK = () => {
-    const el = document.activeElement && document.activeElement.closest && document.activeElement.closest('.mslot');
+    const el = document.activeElement && document.activeElement.closest && document.activeElement.closest('.bentry');
     if (el && box.contains(el) && Number(el.dataset.k) !== cur) pick(el);
     return cur;
   };
-  const onTouch = e => { const el = e.target.closest('.mslot'); if (el) pick(el); };
+  const onTouch = ev => { const el = ev.target.closest && ev.target.closest('.bentry'); if (el) pick(el); };
   box.addEventListener('focusin', onTouch); box.addEventListener('pointerdown', onTouch);
-  for (let i = 0; i < 4; i++) addSlot();
-  pick(box.firstElementChild); sum();
-  document.getElementById('m-add').onclick = () => { addSlot(); pick(box.lastElementChild); document.getElementById('m-name-' + (slots.length - 1)).focus(); };
-  document.getElementById('m-save').onclick = () => {
+  // 매수금액, 단타 새 기록은 매도가까지 넣으면 수수료·세금 뺀 손익
+  const calc = e => {
+    const id = n => fid(e.k, n), bp = nval(id('bp')), q = nval(id('qty')), sp = nval(id('sell')), a = bp * q, quickNew = isQuick() && !editId;
+    const c = quickNew && bp > 0 && q > 0 && sp > 0 ? calcTrade({ status: 'closed', buyPrice: bp, sellPrice: sp, qty: q, sellQty: q }, settings) : null;
+    document.getElementById(id('amt')).innerHTML = c
+      ? `순손익 <b class="${pnlClass(c.net)} num amt">${fmtSigned(c.net)}원</b> · <b class="${pnlClass(c.net)}">${fmtPct(c.pct)}</b> <span class="muted">(수수료·세금 차감)</span>`
+      : '매수금액 <b class="num">' + (isFinite(a) ? fmtNum(a) + '원' : '-') + '</b>' + (quickNew ? ' <span class="muted">· 매도가까지 넣으면 바로 청산</span>' : '');
+  };
+  // 매수 ↔ 무포지션 · 단타 ↔ 다른 전략: 보일 칸과 이름표를 맞춤 (숨긴 칸의 값은 그대로 둠)
+  const applyMode = () => {
+    const T = FORM_TEXT[mode], quick = isQuick();
+    document.querySelectorAll('#f-mode button').forEach(b => b.classList.toggle('on', b.dataset.v === mode));
+    document.getElementById('sheet-title').textContent = editId ? T.title.replace(/^\S+ /, '') + ' 수정' : T.title;
+    document.querySelectorAll('#sheet-body [data-buyonly], #sheet-body [data-flatonly], #sheet-body [data-full], #sheet-body [data-sellonly]').forEach(el => {
+      el.hidden = (el.hasAttribute('data-buyonly') && mode !== 'buy') || (el.hasAttribute('data-flatonly') && mode !== 'flat')
+        || (el.hasAttribute('data-full') && quick) || (el.hasAttribute('data-sellonly') && !(quick && !editId));
+    });
+    box.classList.toggle('multi', mode === 'buy' && !editId);   // 새 매수: 칸 번호·테두리
+    document.getElementById('f-lab-date').textContent = T.date;
+    entries.forEach(e => {
+      const el = n => document.getElementById(fid(e.k, n));
+      el('lab-cat').textContent = T.cat; el('cat').placeholder = T.catPh;
+      el('lab-reason').textContent = quick ? FORM_TEXT.quick.reason : T.reason; el('reason').placeholder = quick ? FORM_TEXT.quick.reasonPh : T.reasonPh;
+      el('lab-scn').textContent = T.scn; el('scn').placeholder = T.scnPh; el('raw').placeholder = T.raw;
+      el('img-hint').innerHTML = '(캡처 후 <b>Ctrl+V</b> 또는 이미지 선택 — ' + (mode === 'flat' ? '블로그 일일 카드에 들어감' : '블로그 카드에 들어감') + ')';
+      calc(e);
+    });
+    document.getElementById('f-save').textContent = editId ? '수정 저장' : T.save;
+  };
+  const bindEntry = e => {
+    const k = e.k, id = n => fid(k, n);
+    bindChips(id('tags'), 'reasonTags'); if (!k) bindChips('f-ftags', 'flatTags');
+    document.getElementById(id('conf')).dataset.v = e.t.confidence || 0; bindStars(id('conf'));
+    bindCommaFormat([id('bp'), id('sell'), id('qty')]);
+    [id('bp'), id('sell'), id('qty')].forEach(x => document.getElementById(x).addEventListener('input', () => calc(e)));
+    // 종목 자동완성
+    const nameEl = document.getElementById(id('name')), sug = document.getElementById(id('suggest'));
+    nameEl.addEventListener('input', () => {
+      e.code = ''; e.market = ''; document.getElementById(id('code-hint')).textContent = '목록에 없으면 그냥 입력해도 됨';
+      const list = searchStocks(nameEl.value, liveTrades());
+      sug.hidden = !list.length;
+      sug.innerHTML = stockSuggestHTML(list);
+    });
+    sug.addEventListener('click', ev => {
+      const b = ev.target.closest('button'); if (!b) return;
+      nameEl.value = b.dataset.n; e.code = b.dataset.c; e.market = b.dataset.m; sug.hidden = true;
+      document.getElementById(id('code-hint')).textContent = e.code + ' · ' + (MARKET_LABEL[e.market] || '');
+      document.getElementById(id('bp')).focus();
+    });
+    nameEl.addEventListener('blur', () => setTimeout(() => { sug.hidden = true; }, 200));
+    // 차트 이미지 (장수 제한 없음, 사진마다 메모) — Ctrl+V는 이 칸이 대상일 때만
+    e.field = mountImageField(id('thumbs'), e.imgIds, e.t.id, e.notes, () => targetK() === k);
+    // AI 정리 (매수 근거 / 무포지션 이유)
+    document.getElementById(id('ai')).onclick = async () => {
+      const raw = val(id('raw')), msg = document.getElementById(id('ai-msg'));
+      if (!raw && !e.imgIds.length) { msg.textContent = '메모를 쓰거나 차트 이미지를 붙여주세요'; return; }
+      msg.innerHTML = '<span class="spinner"></span> 정리 중…';
+      try {
+        const srcs = (await Promise.all(e.imgIds.slice(0, 1).map(getImage))).filter(Boolean);
+        const r = await aiStructureThesis(raw || '(메모 없음 — 차트만 보고 정리)', { name: nameEl.value, mode }, srcs);
+        const tagBox = mode === 'flat' ? 'f-ftags' : id('tags');
+        setChips(tagBox, [...new Set([...chipVals(tagBox), ...r.tags])]);
+        const fill = (fieldId, v) => { const el = document.getElementById(fieldId); if (v && !el.value.trim()) el.value = v; else if (v && el.value.trim() !== v) el.value = el.value.trim() + '\n' + v; };
+        fill(id('cat'), r.catalyst); fill(id('reason'), r.reason); fill(id('scn'), r.scenario);
+        if (mode === 'buy' && r.confidence) { const cb = document.getElementById(id('conf')); cb.dataset.v = r.confidence; cb.querySelectorAll('button').forEach(x => x.classList.toggle('on', Number(x.dataset.v) <= r.confidence)); }
+        msg.textContent = '채움 완료 (' + r.model + ') — 확인하고 고쳐서 저장';
+      } catch (err) { msg.textContent = '실패: ' + err.message + ' (메모는 그대로 있음)'; }
+    };
+    document.getElementById(id('news')).onclick = () => {
+      const name = nameEl.value.trim(); if (!name) { toast('종목명부터 입력'); return; }
+      openNews(name);
+    };
+  };
+  const addEntry = t => {
+    const e = { k: entries.length, t, imgIds: [...(t.imgIds || [])], notes: { ...(t.imgNotes || {}) }, code: t.code || '', market: t.market || '' };
+    if (e.k) box.insertAdjacentHTML('beforeend', buyEntryHTML(e.k, t));   // 1번 칸은 처음부터 그려져 있음
+    entries.push(e); bindEntry(e);
+    return e;
+  };
+  addEntry(t0);
+  document.getElementById('f-mode').onclick = ev => { const b = ev.target.closest('button'); if (!b) return; mode = b.dataset.v; applyMode(); };
+  bindChips('f-strategy');
+  document.getElementById('f-strategy').addEventListener('click', applyMode);   // 단타를 고르면 칸이 짧아짐
+  const addBtn = document.getElementById('f-add');
+  if (addBtn) addBtn.onclick = () => {
+    const e = addEntry(fresh()); applyMode(); pick(box.lastElementChild);
+    addBtn.textContent = `＋ ${entries.length + 1}번 종목 추가`;
+    document.getElementById(fid(e.k, 'name')).focus();
+  };
+  applyMode(); pick(box.firstElementChild);
+
+  document.getElementById('f-save').onclick = () => {
     if (group.busy()) { toast('이미지 추가 중 — 끝나면 저장해주세요'); return; }
-    const d = val('m-date');
-    if (!d) { toast('날짜를 입력하세요'); return; }
-    const rows = [];
-    for (const s of slots) {
-      const f = p => val(p + s.k), name = f('m-name-'), memo = f('m-memo-');
-      if (!name && !memo && !f('m-bp-') && !f('m-sp-') && !f('m-qty-') && !s.imgIds.length) continue;   // 빈 칸은 건너뜀
-      const bp = nval('m-bp-' + s.k), sp = nval('m-sp-' + s.k), q = nval('m-qty-' + s.k);
-      const bad = msg => { toast(`${s.k + 1}번 칸: ${msg}`); pick(box.children[s.k]); box.children[s.k].scrollIntoView({ block: 'center' }); };
-      if (!name) { bad('종목명을 입력하세요'); return; }
-      if (!(bp > 0) || !(q > 0)) { bad('매수가·수량을 입력하세요'); return; }
-      if (f('m-sp-') && !(sp > 0)) { bad('매도가를 확인하세요'); return; }
-      rows.push({ s, name, memo, bp, sp, q });
+    const date = val('f-bd');
+    if (!date) { toast('날짜를 입력하세요'); return; }   // 날짜 없으면 어느 화면에서도 못 찾음
+    const now = Date.now(), quickNew = isQuick() && !editId, rows = [];
+    if (mode === 'flat') {
+      const d = { buyDate: date, catalyst: val('f-cat'), reason: val('f-reason'), scenario: val('f-scn'), status: 'flat', tags: chipVals('f-ftags'),
+        // 종목·가격·예전 목표/손절/시각은 지움
+        strategy: undefined, name: undefined, code: undefined, market: undefined, buyPrice: undefined, qty: undefined, confidence: undefined,
+        targetPct: undefined, stopPct: undefined, buyTime: undefined };
+      if (!d.tags.length && !d.reason && !d.catalyst) { toast('무포지션 이유를 하나 이상 남겨주세요'); return; }
+      rows.push({ e: entries[0], d });
+    } else {
+      const many = entries.length > 1;
+      for (const e of entries) {
+        const id = n => fid(e.k, n), sell = val(id('sell'));
+        const d = { buyDate: date, catalyst: val(id('cat')), reason: val(id('reason')), scenario: val(id('scn')),
+          ...(isFlat(e.t) ? { status: 'open' } : {}), strategy: chipVals('f-strategy')[0] || settings.strategies[0],
+          name: val(id('name')), code: e.code, market: e.market, buyPrice: nval(id('bp')), qty: nval(id('qty')), tags: chipVals(id('tags')),
+          confidence: Number(document.getElementById(id('conf')).dataset.v) || null };
+        // 여러 칸일 때 아무것도 안 쓴 칸은 건너뜀
+        if (many && !d.name && !val(id('bp')) && !val(id('qty')) && !sell && !d.reason && !d.catalyst && !d.scenario && !d.tags.length && !e.imgIds.length && !val(id('raw'))) continue;
+        const bad = msg => {
+          toast((many ? `${e.k + 1}번 칸: ` : '') + msg);
+          if (many) { const el = box.children[e.k]; pick(el); el.scrollIntoView({ block: 'center' }); }
+        };
+        if (!d.name) { bad('종목명을 입력하세요'); return; }
+        if (!(d.buyPrice > 0) || !(d.qty > 0)) { bad('매수가·수량을 입력하세요'); return; }
+        const sp = quickNew && sell ? nval(id('sell')) : NaN;
+        if (quickNew && sell && !(sp > 0)) { bad('매도가를 확인하세요'); return; }
+        rows.push({ e, d, sp });
+      }
+      if (!rows.length) { toast('종목명을 입력하세요'); return; }
     }
-    if (!rows.length) { toast('종목을 하나 이상 입력하세요'); return; }
-    const now = Date.now();
-    rows.forEach(({ s, name, memo, bp, sp, q }) => upsertTrade(sp > 0
-      ? { id: s.id, status: 'closed', strategy: '단타', name, code: s.code, market: s.market, buyDate: d, buyPrice: bp, qty: q, tags: [], imgIds: [],
-        sellDate: d, sellPrice: sp, sellQty: q, netManual: null, mistakes: [], review: memo, sellImgIds: s.imgIds, reviewAt: now }
-      : { id: s.id, status: 'open', strategy: '단타', name, code: s.code, market: s.market, buyDate: d, buyPrice: bp, qty: q, tags: [],
-        reason: memo, imgIds: s.imgIds, thesisAt: now }));
-    group.commit(); closeSheet(true); rerenderActive();
-    toast(`${rows.length}종목 저장 — 일일 카드에 1. 2. 3. 순서로 나옴`);
+    rows.forEach(({ e, d, sp }) => {
+      const t = e.t;
+      Object.assign(t, d, { imgIds: e.imgIds, imgNotes: pruneNotes(e.notes, [...e.imgIds, ...(t.sellImgIds || [])]) });
+      if (sp > 0) Object.assign(t, { status: 'closed', sellDate: date, sellPrice: sp, sellQty: t.qty, netManual: null, mistakes: [], reviewAt: now });   // 단타: 그날 청산
+      if (!t.thesisAt) t.thesisAt = now;
+      else if (now - t.thesisAt > 6 * 3600e3) t.thesisEditedAt = now;   // 사후 수정 흔적 남김
+      upsertTrade(t);
+    });
+    // 저장한 칸의 사진은 확정, 저장 안 한 칸(빈 칸 · 무포지션일 때 2번부터)에 붙인 사진은 정리
+    entries.forEach(e => (rows.some(r => r.e === e) ? e.field.commit() : e.field.cancel()));
+    if (activeImageField === group) activeImageField = null;
+    closeSheet(true);
+    const closedN = rows.filter(r => r.sp > 0).length, t1 = rows[0].e.t;
+    toast(editId ? '수정됨' : mode === 'flat' ? '무포지션 박제 완료'
+      : rows.length > 1 ? `${rows.length}종목 근거 박제 완료${closedN ? ` · 청산 ${closedN}건` : ''}`
+      : closedN ? `저장 — ${t1.name} ${fmtPct(calcTrade(t1, settings).pct)}` : '근거 박제 완료 — 복기 대기에 표시됨');
+    rerenderActive();
   };
 }
 
