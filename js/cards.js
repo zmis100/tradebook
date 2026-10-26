@@ -41,6 +41,8 @@ const CARD_CSS = `
 .bc-badge{font-size:15px;font-weight:800;border-radius:8px;padding:4px 10px;background:var(--b-bg);border:1.5px solid var(--b-line)}
 .bc-img{width:100%;border-radius:14px;display:block;border:1px solid var(--b-line)}
 .bc-img+.bc-img{margin-top:12px}
+.bc-shot+.bc-shot{margin-top:16px}
+.bc-imgnote{font-size:18px;line-height:1.6;white-space:pre-wrap;margin:10px 2px 0;color:var(--b-text)}
 .bc-panel+.bc-imgs{margin-top:14px}
 .bc-sec .bc-imgs:not(:last-child){margin-bottom:14px}
 .bc-cap{font-size:15px;font-weight:800;color:var(--b-muted);margin:12px 0 8px}
@@ -80,9 +82,11 @@ function thesisPanel(t) {
   </div>`;
 }
 
-/* 첨부 사진 묶음 (세로로 이어 붙임, caption 있으면 위에 작은 제목) */
-const cardImgs = (srcs, caption) => (srcs || []).length
-  ? `<div class="bc-imgs">${caption ? `<div class="bc-cap">${caption}</div>` : ''}${srcs.map(s => `<img class="bc-img" src="${s}" alt="">`).join('')}</div>` : '';
+/* 첨부 사진 묶음 (세로로 이어 붙임, caption 있으면 위에 작은 제목, 사진마다 아래에 그 사진 메모)
+   items: [{ src, note }] */
+const cardImgs = (items, caption) => (items || []).length
+  ? `<div class="bc-imgs">${caption ? `<div class="bc-cap">${caption}</div>` : ''}${items.map(x =>
+    `<div class="bc-shot"><img class="bc-img" src="${x.src}" alt="">${x.note ? `<div class="bc-imgnote">${esc(x.note)}</div>` : ''}</div>`).join('')}</div>` : '';
 /* 일일 카드에 들어가는 매매: 그날 청산 / 그날 진입(같은 날 사고 판 건 청산 쪽에만) / 무포지션 */
 function dayParts(date) {
   const live = liveTrades();
@@ -130,17 +134,17 @@ function dayCardHTML(date, o) {
   const hero = closed.length ? `<div class="bc-hero"><div><div class="bc-sub" style="margin:0 0 6px">실현 ${closed.length}건 · ${st.wins}승 ${st.losses}패</div>
       <div class="big ${pnlClass(st.net)}">${o.masked ? fmtPct(dayPct) : fmtSigned(st.net) + '원'}</div></div>
       <div style="text-align:right"><div class="bc-sub" style="margin:0">${Number(date.slice(5, 7))}월 누적</div><div style="font-size:24px;font-weight:800" class="${pnlClass(mst.net)}">${o.masked ? '승률 ' + mst.winRate.toFixed(0) + '%' : fmtCompact(mst.net)}</div></div></div>` : '';
-  const closedSec = closed.length ? `<div class="bc-sec"><div class="bc-sec-t">📊 청산 결과</div>${closed.map(t => {
+  const closedSec = closed.length ? `<div class="bc-sec"><div class="bc-sec-t">📊 청산 결과</div>${closed.map((t, i) => {
     const c = calcTrade(t, settings);
-    const row = `<div class="bc-row"><div style="min-width:0"><div class="n">${esc(t.name)}</div>
+    const row = `<div class="bc-row"><div style="min-width:0"><div class="n">${i + 1}. ${esc(t.name)}</div>
       <div class="d">${esc([(t.tags || []).slice(0, 3).join(' · '), t.catalyst].filter(Boolean).join(' / '))}</div>
       <div class="d"><b>${t.thesisHit ? HIT_LABEL[t.thesisHit] : ''}</b>${t.lesson ? ' — ' + esc(t.lesson) : ''}</div></div>
       <div class="r ${pnlClass(c.net)}">${fmtPct(c.pct)}${o.masked ? '' : `<small>${fmtSigned(c.net)}</small>`}</div></div>`;
     const p = pics(t.id), photos = cardImgs(p.buy, '📌 매수 시점') + cardImgs(p.sell, '📊 매도·결과');
     return photos ? `<div class="bc-item">${row}${photos}</div>` : row;
   }).join('')}</div>` : '';
-  const openSec = opened.length ? `<div class="bc-sec"><div class="bc-sec-t">📌 신규 진입</div>${opened.map(t => `
-    <div class="bc-panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:21px">${esc(t.name)}</b>
+  const openSec = opened.length ? `<div class="bc-sec"><div class="bc-sec-t">📌 신규 진입</div>${opened.map((t, i) => `
+    <div class="bc-panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:21px">${i + 1}. ${esc(t.name)}</b>
       <span style="font-size:16px;color:var(--b-muted);font-weight:700">${fmtNum(t.buyPrice)}원 ${t.buyTime ? '· ' + esc(t.buyTime) : ''}</span></div>
       ${(t.tags || []).length ? `<div class="bc-chips" style="margin-top:8px">${t.tags.map(x => `<span class="bc-chip">${esc(x)}</span>`).join('')}</div>` : ''}
       ${t.catalyst ? `<p><span class="bc-k">재료</span>${esc(t.catalyst)}</p>` : ''}
@@ -253,17 +257,19 @@ async function openCard(kind, payload) {
 }
 async function cardHTML() {
   const { kind, payload } = cardState, o = { theme: cardState.theme, masked: cardState.masked };
-  const load = (on, ids) => on ? Promise.all((ids || []).map(getImage)).then(a => a.filter(Boolean)) : [];
+  // 사진 + 그 사진 메모 (매매의 imgNotes) — 못 읽은 사진은 뺌
+  const load = (on, ids, notes) => on
+    ? Promise.all((ids || []).map(async id => ({ src: await getImage(id), note: (notes || {})[id] || '' }))).then(a => a.filter(x => x.src)) : [];
   if (kind === 'trade') {
     const t = getTrade(payload);
-    [o.buyImgs, o.sellImgs] = await Promise.all([load(cardState.withBuyImg, t.imgIds), load(cardState.withSellImg, t.sellImgIds)]);
+    [o.buyImgs, o.sellImgs] = await Promise.all([load(cardState.withBuyImg, t.imgIds, t.imgNotes), load(cardState.withSellImg, t.sellImgIds, t.imgNotes)]);
     return tradeCardHTML(t, o);
   }
   if (kind === 'day') {   // 그날 카드에 나오는 매매들의 사진을 미리 읽어 둠 (매도 사진은 청산된 매매만)
     const p = dayParts(payload);
     o.imgMap = {};
     await Promise.all([...p.closed, ...p.opened, ...p.flats].map(async t => {
-      const [buy, sell] = await Promise.all([load(cardState.withBuyImg, t.imgIds), load(cardState.withSellImg && t.status === 'closed', t.sellImgIds)]);
+      const [buy, sell] = await Promise.all([load(cardState.withBuyImg, t.imgIds, t.imgNotes), load(cardState.withSellImg && t.status === 'closed', t.sellImgIds, t.imgNotes)]);
       o.imgMap[t.id] = { buy, sell };
     }));
     return dayCardHTML(payload, o);

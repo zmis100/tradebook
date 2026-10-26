@@ -73,18 +73,30 @@ function thesisBlock(t, title) {
 /* ===== 이미지 첨부 칸 (매수·결과 폼 공용) — 파일 선택 · ⧉ 붙여넣기 · Ctrl+V, 장수 제한 없음
    폼마다 자기 상태: 취소하면 새로 붙인 것만 지우고, 뺀 기존 사진은 저장할 때만 지움 ===== */
 let activeImageField = null;   // 지금 열린 폼의 첨부 칸 (Ctrl+V 대상)
-function mountImageField(boxId, ids, tradeId) {
+/* 사진별 메모(imgNotes: {사진id: 메모}) 중 남아 있는 사진 것만, 빈 메모는 빼고 */
+const pruneNotes = (notes, ids) => Object.fromEntries(Object.entries(notes || {}).filter(([k, v]) => ids.includes(k) && v && v.trim()));
+function mountImageField(boxId, ids, tradeId, notes = {}) {
   if (activeImageField) activeImageField.cancel();   // 저장 없이 바뀐 이전 폼 정리
   const added = [], removed = [];
-  let adding = 0, alive = true, rseq = 0;
+  let adding = 0, alive = true, rseq = 0, focusId = null;
   const render = async () => {
     const my = ++rseq;
     const srcs = await Promise.all(ids.map(getImage));
     const box = document.getElementById(boxId);
     if (!box || my !== rseq) return;                 // 더 최근에 시작한 그리기가 있으면 양보
-    box.innerHTML = ids.map((id, i) => `<div class="thumb"><img src="${srcs[i] || ''}" alt=""><button type="button" data-rm="${id}" aria-label="삭제">✕</button></div>`).join('') +
+    // 메모 입력 중이면 다시 그린 뒤 커서 위치 복원
+    const act = document.activeElement, keep = act && act.dataset && box.contains(act) && act.dataset.note
+      ? { id: act.dataset.note, s: act.selectionStart, e: act.selectionEnd } : null;
+    box.innerHTML = `<div class="imgrows">${ids.map((id, i) => `<div class="imgrow"><div class="thumb"><img src="${srcs[i] || ''}" alt=""></div>
+        <textarea data-note="${id}" placeholder="이 캡처에 대한 이유·메모 (${i + 1}번)">${esc(notes[id] || '')}</textarea>
+        <button type="button" class="imgrm" data-rm="${id}" aria-label="삭제">✕</button></div>`).join('')}</div>` +
       '<label class="thumb-add">＋ 이미지<input type="file" accept="image/*" multiple hidden></label>' +
       (navigator.clipboard && navigator.clipboard.read ? '<button type="button" class="thumb-add" data-paste>⧉ 붙여넣기</button>' : '');
+    box.querySelectorAll('[data-note]').forEach(ta => { ta.oninput = () => { notes[ta.dataset.note] = ta.value; }; });
+    const target = focusId || (keep && keep.id);
+    const ta = target && box.querySelector(`[data-note="${target}"]`);
+    if (ta) { ta.focus(); if (!focusId && keep) ta.setSelectionRange(keep.s, keep.e); }
+    focusId = null;
     const fi = box.querySelector('input[type=file]');
     fi.onchange = () => addFiles([...fi.files]);
     const pb = box.querySelector('[data-paste]');
@@ -101,7 +113,7 @@ function mountImageField(boxId, ids, tradeId) {
     box.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
       const id = b.dataset.rm, i = ids.indexOf(id);
       if (i < 0) return;                                       // 빠른 연속 클릭: 이미 뺀 사진
-      ids.splice(i, 1); b.closest('.thumb').remove();
+      ids.splice(i, 1); b.closest('.imgrow').remove(); delete notes[id];
       const j = added.indexOf(id);
       if (j >= 0) { added.splice(j, 1); removeImage(id); }     // 방금 붙인 것 → 바로 지움
       else if (!removed.includes(id)) removed.push(id);        // 저장돼 있던 것 → 저장할 때 지움
@@ -115,7 +127,7 @@ function mountImageField(boxId, ids, tradeId) {
         const id = await addImage(f, tradeId);
         if (!alive) { removeImage(id); break; }                // 그사이 폼을 닫았으면 되돌림
         ids.push(id); added.push(id); n++;
-        render();                                              // 한 장씩 바로 보이게
+        focusId = id; render();                                // 한 장씩 바로 보이고, 방금 붙인 사진의 메모 칸으로 커서
       }
     } catch (e) { toast('이미지 추가 실패: ' + e.message); }
     finally { adding--; }
@@ -226,7 +238,8 @@ function openBuyForm(editId, startMode) {
   ['f-bp', 'f-qty'].forEach(id => document.getElementById(id).addEventListener('input', upd)); upd();
   // 차트 이미지 (장수 제한 없음)
   const imgIds = [...(t.imgIds || [])];
-  imgField = mountImageField('f-thumbs', imgIds, t.id);
+  const notes = { ...(t.imgNotes || {}) };
+  imgField = mountImageField('f-thumbs', imgIds, t.id, notes);
   // AI 정리 (매수 근거 / 무포지션 이유)
   document.getElementById('f-ai').onclick = async () => {
     const raw = val('f-raw'), msg = document.getElementById('f-ai-msg');
@@ -266,7 +279,7 @@ function openBuyForm(editId, startMode) {
       if (!d.name) { toast('종목명을 입력하세요'); return; }
       if (!(d.buyPrice > 0) || !(d.qty > 0)) { toast('매수가·수량을 입력하세요'); return; }
     }
-    Object.assign(t, d, { imgIds });
+    Object.assign(t, d, { imgIds, imgNotes: pruneNotes(notes, [...imgIds, ...(t.sellImgIds || [])]) });
     if (!t.thesisAt) t.thesisAt = Date.now();
     else if (Date.now() - t.thesisAt > 6 * 3600e3) t.thesisEditedAt = Date.now();   // 사후 수정 흔적 남김
     upsertTrade(t); imgField.commit();
@@ -301,7 +314,8 @@ function openSellForm(id) {
     <div class="sheet-foot btn-row"><button type="button" class="btn primary block" id="s-save">${editing ? '수정 저장' : '결과 저장'}</button></div>`, () => imgField && imgField.cancel());
   bindSeg('s-hit'); bindSeg('s-plan'); bindChips('s-mis', 'mistakeTags'); bindCommaFormat(['s-sp', 's-qty', 's-man']);
   const sellImgIds = [...(t.sellImgIds || [])];
-  imgField = mountImageField('s-thumbs', sellImgIds, t.id);
+  const notes = { ...(t.imgNotes || {}) };
+  imgField = mountImageField('s-thumbs', sellImgIds, t.id, notes);
   const calc = () => {
     const tmp = { ...t, status: 'closed', sellPrice: nval('s-sp'), sellQty: nval('s-qty'), netManual: val('s-man') === '' ? null : nval('s-man') };
     const c = isFinite(tmp.sellPrice) && tmp.sellPrice > 0 ? calcTrade(tmp, settings) : null;
@@ -315,7 +329,8 @@ function openSellForm(id) {
     if (!(sq > 0) || sq > t.qty) { toast('매도 수량 확인 (1 ~ ' + t.qty + ')'); return; }
     Object.assign(t, { status: 'closed', sellPrice: sp, sellQty: sq, sellDate: val('s-sd'),
       netManual: val('s-man') === '' ? null : nval('s-man'), thesisHit: segVal('s-hit'), planKept: segVal('s-plan'),
-      mistakes: chipVals('s-mis'), review: val('s-rev'), lesson: val('s-les'), sellImgIds, reviewAt: t.reviewAt || Date.now() });
+      mistakes: chipVals('s-mis'), review: val('s-rev'), lesson: val('s-les'), sellImgIds,
+      imgNotes: pruneNotes(notes, [...(t.imgIds || []), ...sellImgIds]), reviewAt: t.reviewAt || Date.now() });
     upsertTrade(t); imgField.commit(); closeSheet(true); rerenderActive();
     const c = calcTrade(t, settings);
     toast(`저장 — ${t.name} ${fmtPct(c.pct)}`);
@@ -332,10 +347,12 @@ function openDayNote(date) {
 }
 
 /* ===== 매매 / 무포지션 상세 ===== */
-async function showImages(boxId, ids) {
+async function showImages(boxId, ids, notes) {
   const box = document.getElementById(boxId); if (!box) return;
-  const srcs = (await Promise.all((ids || []).map(getImage))).filter(Boolean);
-  box.innerHTML = srcs.map((s, i) => `<button type="button" class="thumb" data-i="${i}" style="padding:0;cursor:zoom-in"><img src="${s}" alt="차트"></button>`).join('');
+  const items = (await Promise.all((ids || []).map(async id => ({ src: await getImage(id), note: (notes || {})[id] || '' })))).filter(x => x.src);
+  const srcs = items.map(x => x.src);
+  box.innerHTML = items.length ? `<div class="imgrows">${items.map((x, i) => `<div class="imgrow view"><button type="button" class="thumb" data-i="${i}" style="padding:0;cursor:zoom-in"><img src="${x.src}" alt="차트"></button>
+    <div class="imgnote-v">${x.note ? esc(x.note) : ''}</div></div>`).join('')}</div>` : '';
   // data: 주소는 새 탭으로 바로 못 열어서(브라우저 차단) blob 주소로 변환해 열기
   box.querySelectorAll('[data-i]').forEach(b => b.onclick = async () => {
     const blob = await (await fetch(srcs[b.dataset.i])).blob();
@@ -355,7 +372,7 @@ async function openTradeDetail(id) {
     document.getElementById('dt-edit').onclick = () => openBuyForm(id);
     document.getElementById('dt-card').onclick = () => openCard('day', t.buyDate);
     document.getElementById('dt-del').onclick = () => { if (confirm(mdLabel(t.buyDate) + ' 무포지션 기록을 삭제할까요?')) { deleteTrade(id); closeSheet(true); toast('삭제됨'); rerenderActive(); } };
-    await showImages('dt-imgs', t.imgIds);
+    await showImages('dt-imgs', t.imgIds, t.imgNotes);
     return;
   }
   const c = calcTrade(t, settings);
@@ -386,5 +403,5 @@ async function openTradeDetail(id) {
   document.getElementById('dt-card').onclick = () => openCard('trade', id);
   document.getElementById('dt-news').onclick = () => openNews(t.name);
   document.getElementById('dt-del').onclick = () => { if (confirm(t.name + ' 기록을 삭제할까요?')) { deleteTrade(id); closeSheet(true); toast('삭제됨'); rerenderActive(); } };
-  await Promise.all([showImages('dt-imgs', t.imgIds), showImages('dt-simgs', t.sellImgIds)]);
+  await Promise.all([showImages('dt-imgs', t.imgIds, t.imgNotes), showImages('dt-simgs', t.sellImgIds, t.imgNotes)]);
 }

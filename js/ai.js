@@ -99,7 +99,8 @@ function tradeBrief(t) {
   const c = calcTrade(t, settings);
   return {
     종목: t.name, 전략: t.strategy, 매수: `${t.buyDate} ${t.buyTime || ''} ${t.buyPrice}원`, 근거태그: t.tags, 재료: t.catalyst, 근거: t.reason,
-    목표손절: planTxt(t), 대응계획: t.scenario, 확신도: t.confidence, 근거기록시각: t.thesisAt ? stampLabel(t.thesisAt) : '',
+    목표손절: planTxt(t), 대응계획: t.scenario, 확신도: t.confidence,
+    캡처메모: [...(t.imgIds || []), ...(t.sellImgIds || [])].map(id => (t.imgNotes || {})[id]).filter(Boolean), 근거기록시각: t.thesisAt ? stampLabel(t.thesisAt) : '',
     ...(c ? { 매도: `${t.sellDate} ${t.sellTime || ''} ${t.sellPrice}원`, 수익률: fmtPct(c.pct), 근거적중: t.thesisHit, 계획대로: t.planKept, 실수: t.mistakes, 복기: t.review, 배운점: t.lesson } : {}),
   };
 }

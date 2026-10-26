@@ -16,7 +16,8 @@ run(`gemini = async ({ prompt }) => ({ text: prompt, model: 'stub', sources: [] 
   const D = '2026-10-21', Y = '2026-10-20';
   const base = { qty: 1, sellQty: 1, tags: [], updatedAt: 1, deleted: false };
   trades.push(
-    { ...base, id: 'same', status: 'closed', strategy: '단타', name: '당일매매', buyDate: D, buyPrice: 100, sellDate: D, sellPrice: 101 },
+    { ...base, id: 'same', status: 'closed', strategy: '단타', name: '당일매매', buyDate: D, buyPrice: 100, sellDate: D, sellPrice: 101,
+      imgIds: ['b1'], sellImgIds: ['s1'], imgNotes: { b1: '매수캡처메모', s1: '매도캡처메모' } },
     { ...base, id: 'prev', status: 'closed', strategy: '종가베팅', name: '전일종베', buyDate: Y, buyPrice: 100, sellDate: D, sellPrice: 99 },
     { ...base, id: 'new', status: 'open', strategy: '종가베팅', name: '오늘진입종목', buyDate: D, buyPrice: 100 },
     { ...base, id: 'flat', status: 'flat', buyDate: D, tags: ['지수 약세'], reason: '쉼' });`);
@@ -29,6 +30,7 @@ run(`gemini = async ({ prompt }) => ({ text: prompt, model: 'stub', sources: [] 
   assert.deepStrictEqual(names(rec.신규진입), ['오늘진입종목'], '신규 진입엔 새로 산 것만 (당일매매 제외)');
   assert.ok(!/전일 종가베팅|오늘 신규 진입/.test(r.text), '구성 지시도 통일된 이름 사용');
   assert.strictEqual(rec.무포지션.length, 1, '무포지션 1건');
+  assert.deepStrictEqual(rec.청산결과.find(x => x.종목 === '당일매매').캡처메모, ['매수캡처메모', '매도캡처메모'], '사진 메모가 순서대로 AI 기록에');
   assert.strictEqual((r.text.match(/당일매매/g) || []).length, 1, '당일매매는 프롬프트에 한 번만');
   console.log('OK — AI 블로그 초안 기록 테스트 통과 (당일 매매 1회, 오늘 진입 1건, 무포지션 1건)');
 })().catch(e => { console.error('FAIL', e.message); process.exit(1); });

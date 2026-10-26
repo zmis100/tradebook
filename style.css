@@ -157,6 +157,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); backgro
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .thumb button { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: rgba(0,0,0,0.6); color: #fff; font-size: 12px; line-height: 22px; padding: 0; }
 button.thumb-add { background: none; font: inherit; padding: 0; }
+/* 사진 + 메모 한 줄씩 (입력: 사진·메모·삭제 / 상세: 사진·메모) */
+.imgrows { flex-basis: 100%; display: grid; gap: 8px; }
+.imgrow { display: grid; grid-template-columns: 86px 1fr 32px; gap: 8px; align-items: start; }
+.imgrow.view { grid-template-columns: 86px 1fr; }
+.imgrow textarea { min-height: 86px; font-size: 15px; }
+.imgrm { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); padding: 0; }
+.imgnote-v { font-size: 14px; white-space: pre-wrap; padding-top: 4px; }
 .thumb-add { display: inline-flex; align-items: center; justify-content: center; width: 86px; height: 86px; border-radius: 10px; border: 1px dashed var(--axis); color: var(--muted); font-size: 12px; text-align: center; cursor: pointer; }
 
 /* ===== 바텀시트 ===== */
