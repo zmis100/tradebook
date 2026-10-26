@@ -43,6 +43,7 @@ const CARD_CSS = `
 .bc-img+.bc-img{margin-top:12px}
 .bc-shot+.bc-shot{margin-top:16px}
 .bc-imgnote{font-size:18px;line-height:1.6;white-space:pre-wrap;margin:10px 2px 0;color:var(--b-text)}
+.bc-rev{margin-top:14px;font-size:18px;line-height:1.6}.bc-rev p{margin:0}.bc-row+.bc-rev{margin-top:2px}
 .bc-panel+.bc-imgs{margin-top:14px}
 .bc-sec .bc-imgs:not(:last-child){margin-bottom:14px}
 .bc-cap{font-size:15px;font-weight:800;color:var(--b-muted);margin:12px 0 8px}
@@ -106,7 +107,9 @@ function tradeCardHTML(t, o) {
   const hero = c ? `<div class="bc-hero"><div><div class="big ${pnlClass(c.net)}">${fmtPct(c.pct)}</div>${o.masked ? '' : `<div class="amt ${pnlClass(c.net)}">${cAmt(c.net)}</div>`}</div>
     <div class="bc-flow num">${fmtNum(t.buyPrice)}<span class="arrow">→</span>${fmtNum(t.sellPrice)}</div></div>` :
     `<div class="bc-hero"><div><div class="big" style="font-size:40px">매수 ${fmtNum(t.buyPrice)}원</div>${o.masked ? '' : `<div class="amt">${fmtNum(t.qty)}주</div>`}</div></div>`;
-  const thesis = `<div class="bc-sec"><div class="bc-sec-t">📌 매수 근거 <small>${t.thesisAt ? stampLabel(t.thesisAt) + ' 기록' : ''}</small></div>${thesisPanel(t)}</div>`;
+  // 근거 없이 결과·일지만 쓴 매매(⚡ 여러 종목)는 빈 근거 칸 대신 생략
+  const hasThesis = (t.tags || []).length || t.catalyst || t.reason || planTxt(t) || t.scenario || t.confidence;
+  const thesis = hasThesis ? `<div class="bc-sec"><div class="bc-sec-t">📌 매수 근거 <small>${t.thesisAt ? stampLabel(t.thesisAt) + ' 기록' : ''}</small></div>${thesisPanel(t)}</div>` : '';
   // 첨부 이미지 전부: 매수 시점 → 근거 아래, 매도·결과 → 복기 아래 (세로로 이어 붙임)
   const img = (o.buyImgs || []).length ? `<div class="bc-sec">${cardImgs(o.buyImgs)}</div>` : '';
   const result = c ? `<div class="bc-sec"><div class="bc-sec-t">📊 결과 · 복기 <small>${mdLabel(t.sellDate)} ${esc(t.sellTime || '')}</small></div>
@@ -140,8 +143,10 @@ function dayCardHTML(date, o) {
       <div class="d">${esc([(t.tags || []).slice(0, 3).join(' · '), t.catalyst].filter(Boolean).join(' / '))}</div>
       <div class="d"><b>${t.thesisHit ? HIT_LABEL[t.thesisHit] : ''}</b>${t.lesson ? ' — ' + esc(t.lesson) : ''}</div></div>
       <div class="r ${pnlClass(c.net)}">${fmtPct(c.pct)}${o.masked ? '' : `<small>${fmtSigned(c.net)}</small>`}</div></div>`;
-    const p = pics(t.id), photos = cardImgs(p.buy, '📌 매수 시점') + cardImgs(p.sell, '📊 매도·결과');
-    return photos ? `<div class="bc-item">${row}${photos}</div>` : row;
+    // 1. 종목 → 캡처 → 복기 (⚡ 여러 종목으로 쓴 칸별 일지도 복기로 들어감)
+    const p = pics(t.id), photos = cardImgs(p.buy, '📌 매수 시점') + cardImgs(p.sell, '📊 매도·결과'),
+      rev = t.review ? `<div class="bc-panel bc-rev"><p>${esc(t.review)}</p></div>` : '';
+    return photos || rev ? `<div class="bc-item">${row}${photos}${rev}</div>` : row;
   }).join('')}</div>` : '';
   const openSec = opened.length ? `<div class="bc-sec"><div class="bc-sec-t">📌 신규 진입</div>${opened.map((t, i) => `
     <div class="bc-panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:21px">${i + 1}. ${esc(t.name)}</b>
