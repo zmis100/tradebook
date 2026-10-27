@@ -164,6 +164,9 @@ button.thumb-add { background: none; font: inherit; padding: 0; }
 .imgrow textarea { min-height: 86px; font-size: 15px; }
 .imgrm { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); padding: 0; }
 .imgnote-v { font-size: 14px; white-space: pre-wrap; padding-top: 4px; }
+/* 작성 중 임시 저장을 불러왔을 때 맨 위 안내 */
+.draft-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 700; color: var(--accent);
+  background: var(--accent-wash); border-radius: 12px; padding: 8px 8px 8px 12px; margin-bottom: 12px; }
 /* 새 매수 기록의 종목 칸 1. 2. 3. … — 커서가 있는 칸(Ctrl+V 대상)은 테두리 강조 */
 .bentry-no { display: none; }
 .multi .bentry-no { display: block; font-size: 17px; font-weight: 800; margin-bottom: 8px; }

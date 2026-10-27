@@ -76,12 +76,19 @@ function thesisBlock(t, title) {
    폼마다 자기 상태: 취소하면 새로 붙인 것만 지우고, 뺀 기존 사진은 저장할 때만 지움
    notes가 null이면 사진별 메모 없이 썸네일만 / isTarget이 있으면 여러 칸 폼의 한 칸 (Ctrl+V는 isTarget()인 칸만, 정리는 폼이 함) ===== */
 let activeImageField = null;   // 지금 열린 폼의 첨부 칸 (Ctrl+V 대상)
+/* ===== 작성 중 임시 저장 — 저장 안 하고 닫혔거나(✕·뒤로가기) 앱이 새로 열려도, 같은 기록을 다시 열면 이어 씀 (이 기기에만)
+   키: buy:new(새 매수·무포지션) · buy:<id>(근거 수정) · sell:<id>(결과 기록) · note:<날짜>(시황 메모) ===== */
+const DRAFTS = 'tb_drafts';
+const draftGet = k => loadJSON(DRAFTS, {})[k] || null;
+function draftSet(k, v) { const all = loadJSON(DRAFTS, {}); if (v) all[k] = v; else delete all[k]; localStorage.setItem(DRAFTS, JSON.stringify(all)); }
+const draftBar = label => `<div class="draft-bar"><span>📝 작성 중이던 내용을 불러옴</span><button type="button" class="btn small" id="draft-clear">${label}</button></div>`;
 /* 사진별 메모(imgNotes: {사진id: 메모}) 중 남아 있는 사진 것만, 빈 메모는 빼고 */
 const pruneNotes = (notes, ids) => Object.fromEntries(Object.entries(notes || {}).filter(([k, v]) => ids.includes(k) && v && v.trim()));
 function mountImageField(boxId, ids, tradeId, notes = {}, isTarget = null) {
   if (!isTarget && activeImageField) activeImageField.cancel();   // 저장 없이 바뀐 이전 폼 정리
   const added = [], removed = [];
   let adding = 0, alive = true, rseq = 0, focusId = null;
+  const changed = () => { const bx = document.getElementById(boxId); if (bx) bx.dispatchEvent(new Event('input', { bubbles: true })); };   // 폼 임시 저장에 알림
   const render = async () => {
     const my = ++rseq;
     const srcs = await Promise.all(ids.map(getImage));
@@ -121,6 +128,7 @@ function mountImageField(boxId, ids, tradeId, notes = {}, isTarget = null) {
       const j = added.indexOf(id);
       if (j >= 0) { added.splice(j, 1); removeImage(id); }     // 방금 붙인 것 → 바로 지움
       else if (!removed.includes(id)) removed.push(id);        // 저장돼 있던 것 → 저장할 때 지움
+      changed();
     });
   };
   const addFiles = async files => {
@@ -131,7 +139,7 @@ function mountImageField(boxId, ids, tradeId, notes = {}, isTarget = null) {
         const id = await addImage(f, tradeId);
         if (!alive) { removeImage(id); break; }                // 그사이 폼을 닫았으면 되돌림
         ids.push(id); added.push(id); n++;
-        focusId = id; render();                                // 한 장씩 바로 보이고, 방금 붙인 사진의 메모 칸으로 커서
+        focusId = id; render(); changed();                     // 한 장씩 바로 보이고, 방금 붙인 사진의 메모 칸으로 커서
       }
     } catch (e) { toast('이미지 추가 실패: ' + e.message); }
     finally { adding--; }
@@ -151,7 +159,9 @@ function mountImageField(boxId, ids, tradeId, notes = {}, isTarget = null) {
   const field = {
     busy: () => adding > 0,
     detach() { alive = false; document.removeEventListener('paste', onPaste); if (activeImageField === field) activeImageField = null; },
-    cancel() { field.detach(); added.splice(0).forEach(removeImage); },
+    // orig: 저장돼 있는 사진 — 임시 저장에서 이어 붙였던 사진을 뺐으면(저장된 적 없음) 그것도 지움
+    cancel(orig) { field.detach(); added.splice(0).forEach(removeImage); if (orig) removed.splice(0).filter(id => !orig.includes(id)).forEach(removeImage); },
+    keep(orig = []) { field.detach(); removed.splice(0).filter(id => !orig.includes(id)).forEach(removeImage); },   // 임시 저장: 붙인 사진은 남김
     commit() { field.detach(); removed.splice(0).forEach(removeImage); },
   };
   if (!isTarget) activeImageField = field;
@@ -205,17 +215,30 @@ function buyEntryHTML(k, t) {
 function openBuyForm(editId, startMode) {
   const fresh = () => ({ id: uid(), status: 'open', strategy: settings.strategies[0], buyDate: todayStr(), tags: [], imgIds: [] });
   const t0 = editId ? JSON.parse(JSON.stringify(getTrade(editId))) : fresh();
-  let mode = isFlat(t0) || startMode === 'flat' ? 'flat' : 'buy';
+  const dkey = 'buy:' + (editId || 'new'), draft = draftGet(dkey);
+  const origIds = editId ? [...(t0.imgIds || []), ...(t0.sellImgIds || [])] : [];   // 저장돼 있는 사진
+  // 임시 저장한 칸 → 매매 모양 (글자 칸은 그린 뒤 그대로 채움)
+  const fromDraft = d => ({ id: d.id, code: d.code, market: d.market, tags: d.tags, confidence: d.conf, imgIds: d.imgIds });
+  if (draft) Object.assign(t0, fromDraft(draft.entries[0]), { imgNotes: { ...(t0.imgNotes || {}), ...draft.entries[0].notes },
+    strategy: draft.strategy || t0.strategy, buyDate: draft.date || t0.buyDate });
+  let mode = draft ? startMode || draft.mode : isFlat(t0) || startMode === 'flat' ? 'flat' : 'buy';
   const canSwitch = t0.status !== 'closed';      // 결과까지 기록된 매매는 무포지션으로 바꾸지 않음
   if (activeImageField) activeImageField.cancel();   // 저장 없이 바뀐 이전 폼 정리
   const entries = [];                                // 종목 칸: { k, t, imgIds, notes, field, code, market }
   let cur = 0;                                       // Ctrl+V 받을 칸 = 커서가 있는 칸, 없으면 마지막으로 누른 칸
+  let done = false, initSig = '';                    // done: 저장·버리기 끝남 (더는 임시 저장 안 함)
   const group = {
     busy: () => entries.some(e => e.field.busy()),
-    cancel() { entries.forEach(e => e.field.cancel()); if (activeImageField === group) activeImageField = null; },
+    cancel() {   // 저장 안 하고 닫힘: 쓴 게 있으면 임시 저장(붙인 사진도 남김), 없으면 붙인 사진 정리
+      if (activeImageField === group) activeImageField = null;
+      if (done) return; done = true;
+      const keep = box.isConnected ? persist() : !!draftGet(dkey);
+      entries.forEach(e => (keep ? e.field.keep(origIds) : e.field.cancel(origIds)));
+    },
   };
   activeImageField = group;
   openSheet(FORM_TEXT[mode].title, `
+    ${draft ? draftBar(editId ? '처음 상태로' : '새로 쓰기') : ''}
     <div class="seg" id="f-mode" style="display:${canSwitch ? 'grid' : 'none'};grid-template-columns:1fr 1fr;margin-bottom:14px">
       <button type="button" data-v="buy">📈 매수</button><button type="button" data-v="flat">😴 무포지션</button></div>
     <div data-buyonly style="margin-bottom:12px">${chipGroup('f-strategy', settings.strategies, t0.strategy, false)}</div>
@@ -316,6 +339,14 @@ function openBuyForm(editId, startMode) {
     return e;
   };
   addEntry(t0);
+  if (draft) {   // 임시 저장 이어 쓰기: 칸 수·글자·칩 되살림
+    draft.entries.slice(1).forEach(d => addEntry({ ...fresh(), ...fromDraft(d), imgNotes: d.notes }));
+    draft.entries.forEach((d, k) => {
+      ['name', 'bp', 'sell', 'qty', 'raw', 'cat', 'reason', 'scn'].forEach(n => { document.getElementById(fid(k, n)).value = d[n] || ''; });
+      setChips(fid(k, 'tags'), d.tags || []);
+    });
+    setChips('f-ftags', draft.ftags || []);
+  }
   document.getElementById('f-mode').onclick = ev => { const b = ev.target.closest('button'); if (!b) return; mode = b.dataset.v; applyMode(); };
   bindChips('f-strategy');
   document.getElementById('f-strategy').addEventListener('click', applyMode);   // 단타를 고르면 칸이 짧아짐
@@ -325,7 +356,31 @@ function openBuyForm(editId, startMode) {
     addBtn.textContent = `＋ ${entries.length + 1}번 종목 추가`;
     document.getElementById(fid(e.k, 'name')).focus();
   };
+  if (addBtn) addBtn.textContent = `＋ ${entries.length + 1}번 종목 추가`;
   applyMode(); pick(box.firstElementChild);
+
+  // 임시 저장: 글자·칩·사진이 바뀔 때마다 (새 기록은 뭔가 썼을 때만, 수정은 처음과 달라졌을 때만)
+  const snapshot = () => ({ mode, strategy: chipVals('f-strategy')[0] || '', date: val('f-bd'), ftags: chipVals('f-ftags'),
+    entries: entries.map(e => {
+      const v = n => val(fid(e.k, n));
+      return { id: e.t.id, code: e.code, market: e.market, name: v('name'), bp: v('bp'), sell: v('sell'), qty: v('qty'), raw: v('raw'),
+        cat: v('cat'), reason: v('reason'), scn: v('scn'), tags: chipVals(fid(e.k, 'tags')), conf: Number(document.getElementById(fid(e.k, 'conf')).dataset.v) || 0,
+        imgIds: [...e.imgIds], notes: Object.fromEntries(e.imgIds.map(id => [id, e.notes[id] || ''])) };
+    }) });
+  const isBlank = s => !s.ftags.length && s.entries.every(d => !d.name && !d.bp && !d.sell && !d.qty && !d.raw && !d.cat && !d.reason && !d.scn
+    && !d.tags.length && !d.conf && !d.imgIds.length);
+  const persist = () => { const s = snapshot(), keep = editId ? !!draft || JSON.stringify(s) !== initSig : !isBlank(s); draftSet(dkey, keep ? s : null); return keep; };
+  initSig = JSON.stringify(snapshot());
+  const body = document.getElementById('sheet-body');
+  body.oninput = body.onclick = () => { if (!done) persist(); };
+  const clr = document.getElementById('draft-clear');
+  if (clr) clr.onclick = () => {   // 임시 저장 버리고 처음 상태로
+    done = true; draftSet(dkey, null);
+    if (activeImageField === group) activeImageField = null;
+    entries.forEach(e => { e.field.cancel(origIds); e.imgIds.filter(id => !origIds.includes(id)).forEach(removeImage); });
+    openBuyForm(editId, startMode);
+  };
+  if (draft) toast('작성 중이던 ' + (editId ? '수정 내용' : '기록') + ' 불러옴');
 
   document.getElementById('f-save').onclick = () => {
     if (group.busy()) { toast('이미지 추가 중 — 끝나면 저장해주세요'); return; }
@@ -361,6 +416,7 @@ function openBuyForm(editId, startMode) {
       }
       if (!rows.length) { toast('종목명을 입력하세요'); return; }
     }
+    done = true; draftSet(dkey, null);   // 저장하면 임시 저장은 지움
     rows.forEach(({ e, d, sp }) => {
       const t = e.t;
       Object.assign(t, d, { imgIds: e.imgIds, imgNotes: pruneNotes(e.notes, [...e.imgIds, ...(t.sellImgIds || [])]) });
@@ -369,8 +425,10 @@ function openBuyForm(editId, startMode) {
       else if (now - t.thesisAt > 6 * 3600e3) t.thesisEditedAt = now;   // 사후 수정 흔적 남김
       upsertTrade(t);
     });
-    // 저장한 칸의 사진은 확정, 저장 안 한 칸(빈 칸 · 무포지션일 때 2번부터)에 붙인 사진은 정리
-    entries.forEach(e => (rows.some(r => r.e === e) ? e.field.commit() : e.field.cancel()));
+    // 저장한 칸의 사진은 확정, 저장 안 한 칸(빈 칸 · 무포지션일 때 2번부터 — 늘 새 칸)에 붙인 사진은 정리
+    entries.forEach(e => (rows.some(r => r.e === e) ? e.field.commit() : (e.field.cancel(), e.imgIds.forEach(removeImage))));
+    // 예전에 임시 저장하면서 뺀, 저장돼 있던 사진
+    if (editId) origIds.filter(id => ![...(t0.imgIds || []), ...(t0.sellImgIds || [])].includes(id)).forEach(removeImage);
     if (activeImageField === group) activeImageField = null;
     closeSheet(true);
     const closedN = rows.filter(r => r.sp > 0).length, t1 = rows[0].e.t;
@@ -385,8 +443,11 @@ function openBuyForm(editId, startMode) {
 function openSellForm(id) {
   const t = JSON.parse(JSON.stringify(getTrade(id)));
   const editing = t.status === 'closed';
-  let imgField = null;
+  const dkey = 'sell:' + id, draft = draftGet(dkey), origIds = [...(t.imgIds || []), ...(t.sellImgIds || [])];   // 저장돼 있는 사진
+  let done = false, initSig = '';
+  if (activeImageField) activeImageField.cancel();   // 저장 없이 바뀐 이전 폼 정리 (이전 폼 화면이 남아 있을 때)
   openSheet((editing ? '결과 수정 — ' : '결과 기록 — ') + t.name, `
+    ${draft ? draftBar('처음 상태로') : ''}
     ${thesisBlock(t, '📌 매수 근거 · ' + mdLabel(t.buyDate))}
     <div class="pos-meta" style="margin:-2px 0 12px">매수 ${fmtNum(t.buyPrice)}원 × ${fmtNum(t.qty)}주 · ${mdLabel(t.buyDate)} ${esc(t.buyTime || '')}</div>
     <div class="grid2"><label class="field"><span>매도가</span>${numInput('s-sp', t.sellPrice, '원')}</label>
@@ -403,27 +464,63 @@ function openSellForm(id) {
     <label class="field"><span>배운 점 한 줄</span><input id="s-les" type="text" value="${esc(t.lesson || '')}" placeholder="다음에 똑같이 할 것 / 하지 말 것"></label>
     <div class="field"><span>매도·결과 캡처 <small>(캡처 후 <b>Ctrl+V</b> 또는 이미지 선택 — 블로그 카드 결과 아래에 들어감)</small></span>
       <div class="thumbs" id="s-thumbs"></div></div>
-    <div class="sheet-foot btn-row"><button type="button" class="btn primary block" id="s-save">${editing ? '수정 저장' : '결과 저장'}</button></div>`, () => imgField && imgField.cancel());
+    <div class="sheet-foot btn-row"><button type="button" class="btn primary block" id="s-save">${editing ? '수정 저장' : '결과 저장'}</button></div>`, () => wrap.cancel());
   bindSeg('s-hit'); bindSeg('s-plan'); bindChips('s-mis', 'mistakeTags'); bindCommaFormat(['s-sp', 's-qty', 's-man']);
-  const sellImgIds = [...(t.sellImgIds || [])];
-  const notes = { ...(t.imgNotes || {}) };
-  imgField = mountImageField('s-thumbs', sellImgIds, t.id, notes);
+  if (draft) {   // 임시 저장 이어 쓰기
+    [['s-sp', 'sp'], ['s-qty', 'qty'], ['s-sd', 'sd'], ['s-man', 'man'], ['s-rev', 'rev'], ['s-les', 'les']].forEach(([el, k]) => { document.getElementById(el).value = draft[k] || ''; });
+    [['s-hit', 'hit'], ['s-plan', 'plan']].forEach(([el, k]) => document.querySelectorAll('#' + el + ' button').forEach(b => b.classList.toggle('on', b.dataset.v === draft[k])));
+    setChips('s-mis', draft.mis || []);
+    if (draft.man) document.querySelector('#sheet-body details').open = true;
+  }
+  const sellImgIds = [...(draft ? draft.imgIds : t.sellImgIds || [])];
+  const notes = { ...(t.imgNotes || {}), ...(draft ? draft.notes : {}) };
+  const imgField = mountImageField('s-thumbs', sellImgIds, t.id, notes, () => true);
+  const wrap = {
+    busy: () => imgField.busy(),
+    cancel() {   // 저장 안 하고 닫힘: 쓴 게 있으면 임시 저장(붙인 사진도 남김)
+      if (activeImageField === wrap) activeImageField = null;
+      if (done) return; done = true;
+      const keep = box.isConnected ? persist() : !!draftGet(dkey);
+      if (keep) imgField.keep(origIds); else imgField.cancel(origIds);
+    },
+  };
+  activeImageField = wrap;
   const calc = () => {
     const tmp = { ...t, status: 'closed', sellPrice: nval('s-sp'), sellQty: nval('s-qty'), netManual: val('s-man') === '' ? null : nval('s-man') };
     const c = isFinite(tmp.sellPrice) && tmp.sellPrice > 0 ? calcTrade(tmp, settings) : null;
     document.getElementById('s-calc').innerHTML = c ? `순손익 <b class="${pnlClass(c.net)} num amt">${fmtSigned(c.net)}원</b> · <b class="${pnlClass(c.net)}">${fmtPct(c.pct)}</b> <span class="muted">(수수료 ${fmtNum(c.fee)} · 세금 ${fmtNum(c.tax)}${c.manual ? ' · 직접입력' : ''})</span>` : '매도가 입력하면 수수료·세금 차감 손익 자동 계산';
   };
   ['s-sp', 's-qty', 's-man'].forEach(i => document.getElementById(i).addEventListener('input', calc)); calc();
+  // 임시 저장: 바뀔 때마다 (처음과 달라졌을 때만)
+  const box = document.getElementById('s-thumbs');
+  const snapshot = () => ({ sp: val('s-sp'), qty: val('s-qty'), sd: val('s-sd'), man: val('s-man'), hit: segVal('s-hit'), plan: segVal('s-plan'),
+    mis: chipVals('s-mis'), rev: val('s-rev'), les: val('s-les'), imgIds: [...sellImgIds], notes: Object.fromEntries(sellImgIds.map(x => [x, notes[x] || ''])) });
+  const persist = () => { const s = snapshot(), keep = !!draft || JSON.stringify(s) !== initSig; draftSet(dkey, keep ? s : null); return keep; };
+  initSig = JSON.stringify(snapshot());
+  const body = document.getElementById('sheet-body');
+  body.oninput = body.onclick = () => { if (!done) persist(); };
+  const clr = document.getElementById('draft-clear');
+  if (clr) clr.onclick = () => {   // 임시 저장 버리고 처음 상태로
+    done = true; draftSet(dkey, null);
+    if (activeImageField === wrap) activeImageField = null;
+    imgField.cancel(origIds); sellImgIds.filter(x => !origIds.includes(x)).forEach(removeImage);
+    openSellForm(id);
+  };
+  if (draft) toast('작성 중이던 결과 기록 불러옴');
   document.getElementById('s-save').onclick = () => {
     if (imgField.busy()) { toast('이미지 추가 중 — 끝나면 저장해주세요'); return; }
     const sp = nval('s-sp'), sq = nval('s-qty');
     if (!(sp > 0)) { toast('매도가를 입력하세요'); return; }
     if (!(sq > 0) || sq > t.qty) { toast('매도 수량 확인 (1 ~ ' + t.qty + ')'); return; }
+    done = true; draftSet(dkey, null);   // 저장하면 임시 저장은 지움
     Object.assign(t, { status: 'closed', sellPrice: sp, sellQty: sq, sellDate: val('s-sd'),
       netManual: val('s-man') === '' ? null : nval('s-man'), thesisHit: segVal('s-hit'), planKept: segVal('s-plan'),
       mistakes: chipVals('s-mis'), review: val('s-rev'), lesson: val('s-les'), sellImgIds,
       imgNotes: pruneNotes(notes, [...(t.imgIds || []), ...sellImgIds]), reviewAt: t.reviewAt || Date.now() });
-    upsertTrade(t); imgField.commit(); closeSheet(true); rerenderActive();
+    upsertTrade(t); imgField.commit();
+    origIds.filter(x => ![...(t.imgIds || []), ...sellImgIds].includes(x)).forEach(removeImage);   // 예전에 임시 저장하면서 뺀, 저장돼 있던 사진
+    if (activeImageField === wrap) activeImageField = null;
+    closeSheet(true); rerenderActive();
     const c = calcTrade(t, settings);
     toast(`저장 — ${t.name} ${fmtPct(c.pct)}`);
     setTimeout(() => openTradeDetail(t.id), 250);
@@ -432,10 +529,18 @@ function openSellForm(id) {
 
 /* ===== 시황 메모 ===== */
 function openDayNote(date) {
+  const dkey = 'note:' + date, draft = draftGet(dkey);
+  let done = false;
   openSheet('시황 메모 — ' + mdLabel(date), `
-    <label class="field"><span>오늘 시장 · 내일 계획</span><textarea id="d-note" style="min-height:160px" placeholder="지수·주도 섹터·수급 / 내일 체크할 일정(CPI, 실적 등)">${esc(getDayNote(date))}</textarea></label>
+    ${draft ? draftBar('처음 상태로') : ''}
+    <label class="field"><span>오늘 시장 · 내일 계획</span><textarea id="d-note" style="min-height:160px" placeholder="지수·주도 섹터·수급 / 내일 체크할 일정(CPI, 실적 등)">${esc(draft ? draft.text : getDayNote(date))}</textarea></label>
     <div class="sheet-foot btn-row"><button type="button" class="btn primary block" id="d-save">저장</button></div>`);
-  document.getElementById('d-save').onclick = () => { setDayNote(date, val('d-note')); closeSheet(true); toast('저장됨'); rerenderActive(); };
+  // 임시 저장: 저장된 메모와 달라졌을 때만
+  document.getElementById('sheet-body').oninput = () => { if (!done) { const v = val('d-note'); draftSet(dkey, v !== getDayNote(date).trim() ? { text: v } : null); } };
+  const clr = document.getElementById('draft-clear');
+  if (clr) clr.onclick = () => { done = true; draftSet(dkey, null); openDayNote(date); };
+  if (draft) toast('작성 중이던 메모 불러옴');
+  document.getElementById('d-save').onclick = () => { done = true; draftSet(dkey, null); setDayNote(date, val('d-note')); closeSheet(true); toast('저장됨'); rerenderActive(); };
 }
 
 /* ===== 매매 / 무포지션 상세 ===== */

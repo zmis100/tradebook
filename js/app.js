@@ -25,6 +25,7 @@ function openSheet(title, html, onCancel) {
   const wasOpen = !sheetEl().hidden;
   document.getElementById('sheet-title').textContent = title;
   const body = document.getElementById('sheet-body');
+  body.oninput = body.onclick = null;            // 이전 폼의 임시 저장 연결 끊기 (폼이 새로 연결함)
   body.innerHTML = html; body.scrollTop = 0;
   sheetEl().hidden = false; document.body.style.overflow = 'hidden';
   sheetCancel = onCancel || null;
@@ -63,7 +64,12 @@ function setMask(on) {
 (function init() {
   document.querySelectorAll('.nav-btn').forEach(b => b.onclick = () => showTab(b.dataset.tab));
   document.getElementById('fab').onclick = () => openBuyForm();
-  document.getElementById('sheet').addEventListener('click', e => { if (e.target.closest('[data-close]')) closeSheet(false); });
+  // 기록 폼(글 쓰는 칸 있음)은 바깥 어두운 곳을 눌러도 안 닫힘 — ✕·뒤로가기로 닫고, 쓰던 건 임시 저장돼 다시 열면 이어 씀
+  document.getElementById('sheet').addEventListener('click', e => {
+    const c = e.target.closest('[data-close]'); if (!c) return;
+    if (c.classList.contains('sheet-backdrop') && document.querySelector('#sheet-body textarea')) return;
+    closeSheet(false);
+  });
   document.getElementById('btn-mask').onclick = () => { setMask(!masked()); rerenderActive(); };
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeSheet(false);
